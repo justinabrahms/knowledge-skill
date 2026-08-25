@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>knowledge review</title>
+<style>
+:root{
+  --bg:#f6f6f4; --card:#fff; --ink:#1a1a18; --dim:#75756e; --line:#e2e2dd;
+  --accent:#2c5f9c; --warn:#8a5a10; --warnbg:#fdf6e6; --bad:#a13129; --good:#2e6b39;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#151619; --card:#1d1f23; --ink:#e9e9e5; --dim:#95958e; --line:#31333a;
+  --accent:#82afe4; --warn:#e0b463; --warnbg:#2a2318; --bad:#e58379; --good:#82c48f;
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;align-items:center}
+.bar{width:100%;max-width:720px;display:flex;gap:20px;align-items:baseline;
+  padding:18px 24px 0;color:var(--dim);font-size:13px}
+.bar b{color:var(--ink);font-variant-numeric:tabular-nums}
+.bar .sp{flex:1}
+main{width:100%;max-width:720px;padding:14px 24px 24px;flex:1;display:flex;flex-direction:column}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:26px 28px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.kicker{font:12px/1.4 var(--mono);color:var(--dim);text-transform:uppercase;
+  letter-spacing:.07em;margin-bottom:14px}
+.fact{font-size:18px;line-height:1.55;margin:0 0 14px}
+.fact+.fact{padding-top:14px;border-top:1px solid var(--line)}
+.fact .n{color:var(--dim);font:13px/1 var(--mono);margin-right:8px}
+textarea{width:100%;font:inherit;font-size:18px;line-height:1.55;color:var(--ink);
+  background:transparent;border:1px dashed var(--line);border-radius:8px;padding:10px;
+  resize:vertical;min-height:96px}
+textarea:focus{outline:none;border-color:var(--accent);border-style:solid;background:var(--bg)}
+.warn{background:var(--warnbg);border-left:3px solid var(--warn);color:var(--warn);
+  padding:12px 14px;border-radius:0 8px 8px 0;font-size:14px;margin:16px 0}
+.fact.off{opacity:.42;text-decoration:line-through;text-decoration-color:var(--bad)}
+.fact.off .lifecycle{text-decoration:none}
+.lifecycle{font:12px/1.5 var(--mono);color:var(--dim);margin-top:7px;text-decoration:none}
+.lifecycle b{color:var(--bad)}
+.foot{max-width:620px;margin:16px auto 0;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.55}
+.foot code,.lifecycle code{font-family:var(--mono);font-size:.92em}
+.prov{color:var(--dim);font-size:13px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.keys{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;
+  margin-top:22px;color:var(--dim);font-size:13.5px}
+.keys span{white-space:nowrap}
+kbd{font:12px/1 var(--mono);border:1px solid var(--line);border-bottom-width:2px;
+  border-radius:4px;padding:3px 6px;background:var(--card);color:var(--ink);margin-right:5px}
+.done{text-align:center;padding:70px 20px;color:var(--dim)}
+.done h2{color:var(--ink);font-size:20px;margin:0 0 8px}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;max-width:600px;
+  padding:11px 16px;border-radius:8px;background:var(--card);border:1px solid var(--line);
+  box-shadow:0 8px 28px rgba(0,0,0,.16);font-size:13.5px;display:none;white-space:pre-wrap}
+#toast.bad{border-color:var(--bad);color:var(--bad)}
+#toast.good{border-color:var(--good)}
+#why{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;overflow-y:auto;padding:40px 20px}
+#why .inner{max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:22px 26px}
+.m{border-top:1px solid var(--line);padding:14px 0;font-size:14px}
+.m:first-of-type{border-top:0}
+.m .id{font:12px/1.5 var(--mono);color:var(--accent);word-break:break-all}
+.m .ev{color:var(--dim);font-size:13px;border-left:2px solid var(--line);padding-left:10px;margin-top:6px}
+.tag{font:11px/1.5 var(--mono);border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--dim)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.tab{font:13px/1 system-ui,sans-serif;color:var(--dim);background:transparent;cursor:pointer;
+  border:1px solid var(--line);border-radius:999px;padding:7px 12px 7px 8px}
+.tab.on{color:var(--ink);border-color:var(--accent);background:var(--bg)}
+.tab kbd{margin-right:6px}
+table.grp{width:100%;border-collapse:collapse;font-size:15px}
+table.grp tr{cursor:pointer;border-top:1px solid var(--line)}
+table.grp tr:first-child{border-top:0}
+table.grp tr:hover td{background:var(--bg)}
+table.grp td{padding:9px 6px}
+table.grp td.k{width:34px}
+table.grp td.ct{text-align:right;font:13px/1 var(--mono);color:var(--dim);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.arm{text-align:center;padding:60px 24px}
+.arm h2{font-size:19px;margin:0 0 10px}
+.arm code{font:13px/1.5 var(--mono);color:var(--dim);word-break:break-all}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span><b id="left">–</b> left</span>
+  <span id="grpwrap" hidden>in <b id="grp">–</b> · <kbd>g</kbd>groups</span>
+  <span id="skipwrap" hidden>skipped <b id="skip">0</b></span>
+  <span class="sp"></span>
+  <span id="undowrap" hidden><kbd>u</kbd>undo</span>
+</div>
+<main id="main"></main>
+<div id="toast"></div>
+<div id="why" onclick="closeWhy()"><div class="inner" onclick="event.stopPropagation()"></div></div>
+
+<script>
+let V={}, texts=[], include=[], dim='provenance', editing=false;
+const $=i=>document.getElementById(i);
+const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+function toast(m,c){const t=$('toast');t.textContent=m;t.className=c||'';t.style.display='block';
+  clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',6000);}
+
+async function load(){
+  V=await (await fetch('/api/card')).json();
+  const f=V.filter||{};
+  $('grpwrap').hidden=!(V.chosen&&f.dim);
+  if(f.dim){$('grp').textContent=`${f.value} (${V.group_left} left of ${V.left})`;}
+  $('left').textContent=f.dim?V.left:V.left;
+  $('skip').textContent=V.skipped;
+  $('skipwrap').hidden=!V.skipped;
+  $('undowrap').hidden=!V.undo_depth;
+  texts=(V.card?.keep||[]).map(k=>k.text);
+  include=(V.card?.keep||[]).map(()=>true);
+  editing=false;
+  render();
+}
+
+function render(){
+  const M=$('main');
+  if(!V.armed){
+    M.innerHTML=`<div class="card arm">
+      <h2>This writes to your knowledge store.</h2>
+      <p style="color:var(--dim);font-size:14px">Answering a card runs <code>knowledge confirm</code>
+      and <code>knowledge reject</code> for real. <kbd>u</kbd> reverses the last card.</p>
+      <p><code>${esc(V.store)}</code></p>
+      <div class="keys"><span><kbd>enter</kbd>start reviewing</span></div></div>`;
+    return;
+  }
+  if(!V.chosen){ renderPicker(); return; }
+  if(!V.card){
+    const f=V.filter||{};
+    M.innerHTML=`<div class="card done"><h2>${f.dim?esc(f.value)+' is clear.':'Queue clear.'}</h2>
+      <p>${V.done} card${V.done===1?'':'s'} answered this session. ${V.left} left in the queue.</p>
+      <div class="keys"><span><kbd>g</kbd>pick another group</span></div></div>`;
+    return;
+  }
+  if(false){
+    M.innerHTML=`<div class="card done"><h2>Queue clear.</h2>
+      <p>${V.done} card${V.done===1?'':'s'} answered.</p></div>`;
+    return;
+  }
+  const c=V.card, n=c.keep.length, multi=n>1;
+  // A cluster is only a merge when build_plan marked it one. Groups that merely
+  // shared vocabulary carry dedup:false and must not be labelled as merges.
+  const merge=c.kind==='cluster'&&c.dedup;
+  const kicker = merge
+      ? `merge · ${c.consumes.length} candidates → ${n} fact${n===1?'':'s'}`
+      : c.kind==='cluster'
+        ? `${c.consumes.length} candidates · distinct claims, not merged`
+        : 'single candidate';
+  const on=include.filter(Boolean).length;
+
+  M.innerHTML=`<div class="card">
+    <div class="kicker">${kicker}</div>
+    ${c.keep.map((k,i)=>`<div class="fact${include[i]?'':' off'}">
+      ${multi?`<span class="n">${i+1}/${n}</span>`:''}<span id="t${i}">${esc(texts[i])}</span>
+      <div class="lifecycle">${esc(k.topic)} · ${esc(k.scope)} · confidence ${esc(k.confidence)}
+        · stored as <code>${esc(k.store_id||k.from_id)}</code>
+        ${include[i]?'':' — <b>will be rejected</b>'}</div>
+    </div>`).join('')}
+    ${c.note?`<div class="warn">${esc(c.note)}</div>`:''}
+    <div class="prov">${esc(c.members[0]?.provenance||'')} &nbsp; ${esc(c.members[0]?.proposed_at||'')}</div>
+  </div>
+  <div class="keys">${editing?`
+    <span><kbd>esc</kbd>done editing</span>
+    <span><kbd>\u2318</kbd><kbd>\u21b5</kbd>store as edited</span>
+    <span style="opacity:.55">other keys are text while editing</span>` : `
+    <span><kbd>y</kbd>${merge?'merge → store '+n+' fact'+(n===1?'':'s')
+                        :multi?(on===n?'store both':'store '+on+' of '+n):'store'}</span>
+    ${merge?`<span><kbd>m</kbd>don't merge — store all ${c.consumes.length} separately</span>`:''}
+    ${multi&&!merge?`<span><kbd>1</kbd>…<kbd>${n}</kbd>toggle one off</span>`:''}
+    <span><kbd>x</kbd>reject${multi?' all':''}</span>
+    <span><kbd>e</kbd>edit</span>
+    <span><kbd>s</kbd>skip</span>
+    <span><kbd>?</kbd>${c.kind==='cluster'?`why these ${c.consumes.length}`:'evidence'}</span>`}
+  </div>
+  <div class="foot" id="footnote">reject = <code>knowledge reject</code>: the candidate moves to
+    <code>pending/rejected/</code> with a reason and can't be re-proposed. Nothing in the
+    store is deleted. <kbd>u</kbd> puts it back.</div>`;
+  if(editing) enterBoxes();
+}
+
+const DIMLABEL={provenance:'who claimed it',topic:'topic',session:'originating session',repo:'repo it came from'};
+const DIMKEY={provenance:'p',topic:'t',session:'s',repo:'r'};
+
+function renderPicker(){
+  const g=(V.groups||{})[dim]||[];
+  const open=g.filter(x=>x.left>0);
+  $('main').innerHTML=`<div class="card">
+    <div class="kicker">pick a group · ${V.left} candidates left</div>
+    <div class="tabs">${(V.dims||[]).map(d=>
+      `<button class="tab${d===dim?' on':''}" onclick="setDim('${d}')">
+         <kbd>${DIMKEY[d]}</kbd>${esc(DIMLABEL[d]||d)}</button>`).join('')}</div>
+    <table class="grp">${open.map((x,i)=>`<tr onclick="pick('${encodeURIComponent(x.value)}')">
+      <td class="k">${i<9?`<kbd>${i+1}</kbd>`:''}</td>
+      <td>${esc(x.value)}</td>
+      <td class="ct">${x.left}${x.left!==x.total?` <span style="opacity:.5">of ${x.total}</span>`:''}</td>
+    </tr>`).join('')}</table>
+    ${open.length>9?`<div class="foot" style="margin-top:14px">click the rows past 9</div>`:''}
+  </div>
+  <div class="keys">
+    <span><kbd>1</kbd>…<kbd>${Math.min(9,open.length)}</kbd>review that group</span>
+    <span><kbd>a</kbd>everything, in deck order</span>
+  </div>
+  <div class="foot">A card can carry two topics, so the topic column can total more
+    than ${V.left}. Answering a card removes it from every group it appears in.</div>`;
+}
+function setDim(d){dim=d;renderPicker();}
+async function pick(v){
+  await fetch('/api/select',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dim,value:decodeURIComponent(v)})});
+  load();
+}
+async function pickAll(){
+  await fetch('/api/select',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dim:null})});
+  load();
+}
+async function toGroups(){
+  await fetch('/api/unselect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  load();
+}
+
+// Edit is a mode on the card, not a property of what happens to have focus.
+// Guarding the shortcuts on document.activeElement means clicking the card
+// background silently re-arms every bare letter while a half-typed edit is still
+// on screen — and `g` or `x` then throws the edit away.
+function edit(){ if(editing) return; editing=true; render(); }
+function stopEdit(){ if(!editing) return; editing=false; render(); }
+
+function enterBoxes(){
+  const c=V.card; if(!c) return;
+  c.keep.forEach((k,i)=>{
+    const el=$('t'+i); if(!el||el.tagName==='TEXTAREA') return;
+    const ta=document.createElement('textarea');
+    ta.value=texts[i]; ta.id='t'+i;
+    ta.oninput=()=>{texts[i]=ta.value;};
+    el.replaceWith(ta);
+  });
+  $('t0')?.focus();
+}
+
+function openWhy(){
+  const c=V.card; if(!c) return;
+  document.querySelector('#why .inner').innerHTML=
+    `<div class="kicker">${esc(c.title)}</div>`+
+    c.members.map(m=>`<div class="m">
+      <div class="id">${esc(m.id)}</div>
+      <div>${esc(m.text)}</div>
+      ${m.evidence?`<div class="ev">${esc(m.evidence)}</div>`
+        :`<div class="ev" style="color:var(--bad)">no evidence recorded</div>`}
+      <div style="margin-top:6px"><span class="tag">${esc(m.provenance)}</span>
+        <span class="tag">${esc(m.confidence)}</span><span class="tag">${esc(m.scope)}</span></div>
+    </div>`).join('')+
+    `<div class="keys"><span><kbd>esc</kbd>back</span></div>`;
+  $('why').style.display='block';
+}
+function closeWhy(){$('why').style.display='none';}
+
+async function send(action){
+  const r=await (await fetch('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action,texts,include})})).json();
+  if(!r.ok) toast(r.message,'bad'); else if(action!=='skip') toast(r.message,'good');
+  load();
+}
+async function doUndo(){
+  const r=await (await fetch('/api/undo',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();
+  toast(r.message, r.ok?'good':'bad'); load();
+}
+async function arm(){await fetch('/api/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});load();}
+
+addEventListener('keydown',e=>{
+  if($('why').style.display==='block'){if(e.key==='Escape')closeWhy();return;}
+  if(!V.armed){if(e.key==='Enter')arm();return;}
+  if(!V.chosen){
+    const k=e.key, g=((V.groups||{})[dim]||[]).filter(x=>x.left>0);
+    if(k==='a'){e.preventDefault();pickAll();}
+    else if(Object.values(DIMKEY).includes(k)){
+      e.preventDefault();
+      setDim(Object.keys(DIMKEY).find(d=>DIMKEY[d]===k));
+    }
+    else if(/^[1-9]$/.test(k)&&g[+k-1]){e.preventDefault();pick(encodeURIComponent(g[+k-1].value));}
+    return;
+  }
+  // While the card is in edit mode nothing is a shortcut, wherever focus sits.
+  if(editing){
+    if(e.key==='Escape'){e.preventDefault();stopEdit();}
+    else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();send('keep');}
+    return;
+  }
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  const k=e.key;
+  if(k==='g'){e.preventDefault();toGroups();return;}
+  const merge=V.card?.kind==='cluster'&&V.card?.dedup;
+  if(k==='y'){e.preventDefault();send('keep');}
+  else if(k==='x'){e.preventDefault();send('drop');}
+  else if(k==='m'&&merge){e.preventDefault();send('unmerge');}
+  else if(/^[1-9]$/.test(k)&&V.card&&V.card.keep.length>1&&!merge){
+    e.preventDefault();
+    const i=+k-1;
+    if(i<V.card.keep.length){include[i]=!include[i];render();}
+  }
+  else if(k==='s'){e.preventDefault();send('skip');}
+  else if(k==='e'){e.preventDefault();edit();}
+  else if(k==='u'){e.preventDefault();doUndo();}
+  else if(k==='?'){e.preventDefault();openWhy();}
+});
+
+load();
+</script>
+</body>
+</html>

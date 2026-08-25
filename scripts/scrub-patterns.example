@@ -1,0 +1,30 @@
+# Patterns the pre-publish gate refuses to let into the repo. One ERE per line,
+# matched case-insensitively. Copy to ~/.config/knowledge/scrub-patterns.txt and
+# replace these with your own — and keep that copy OUT of the repo, because a
+# filled-in version of this file describes your employer in some detail.
+#
+# Add a pattern the moment you notice a leak; the list is the memory.
+
+# The organisation the store is about
+acme
+
+# Vendor stack that appears in your facts
+examplevendor|anothervendor
+
+# Your own name and handles
+yourname
+
+# Ticket prefixes, so a real key never ends up in an example
+\b(ABC|XYZ)-[0-9]+
+
+# Registry, cluster and host naming conventions
+acmeregistry|aks-acme
+
+# Internal group aliases
+(dev|platform|managers)@
+
+# Mail domains
+@acme\.(com|io)
+
+# The path your private notes live under
+private-notes|notes/acme

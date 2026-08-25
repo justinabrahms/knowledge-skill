@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated review decks and apply logs contain the store's actual facts.
+# The pre-publish gate also fails on these; the ignore is the first line of
+# defence, not the only one.
+plan.json
+applied-*.json
+*.bak
+knowledge.bak.*
+
+# Per-store artifacts live in the store (.review-cards.py, .review-plan.json).
+# If a copy ever lands here, it is a mistake — the gate fails on these too.
+review-cards*.py
+.review-cards.py
+.review-plan.json
+
+# Your filled-in scrub patterns describe your employer; keep them out of here.
+# The canonical location is ~/.config/knowledge/scrub-patterns.txt.
+scrub-patterns.txt
+scrub-patterns.local
