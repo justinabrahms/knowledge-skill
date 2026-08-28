@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +29,22 @@ import pytest
 import yaml
 
 CLI = Path(__file__).resolve().parent.parent / "bin" / "knowledge"
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(output: str) -> str:
+    """Strip styling and wrapping before matching a literal against CLI output.
+
+    `console` is a plain `rich.Console()`, so highlighting is on and rich colours
+    bare integers: "from 1 active facts" is emitted as
+    "from \\x1b[1;36m1\\x1b[0m active facts". Whether it does depends on the
+    environment -- rich only styles when it thinks something is watching -- so a
+    literal assertion that straddles a number passes on a bare terminal and fails
+    under anything that sets FORCE_COLOR, which every agent harness does. Neither
+    `no_color` nor NO_COLOR is enough; they drop the colour and keep the bold.
+    """
+    return _ANSI.sub("", output).replace("\n", " ")
 
 
 def _load_module():
@@ -479,7 +496,7 @@ class TestTune:
                  invalidated_at="2026-02-02")
         res = CliRunner().invoke(k.app, ["tune"])
         assert res.exit_code == 0, res.output
-        assert "from 1 active facts" in res.output.replace("\n", " ")
+        assert "from 1 active facts" in plain(res.output)
 
     def test_write_requires_a_config_file(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
