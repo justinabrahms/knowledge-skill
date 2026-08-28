@@ -12,7 +12,7 @@ hold for yours. `knowledge tune` derives your own.*
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
     knowledge dupes                      # group near-duplicate candidates for review
     knowledge confirm <id> | reject <id> --reason "duplicate of <survivor>"
-    knowledge recall "$PROMPT" --quiet   # gated retrieval, for a prompt hook
+    knowledge recall "<prompt>" --quiet  # gated retrieval, for a prompt hook
     knowledge usage --unread             # which stored facts nothing ever reads
     knowledge tune                       # derive thresholds from your own review history
 
@@ -51,6 +51,31 @@ intended mechanism and it surprises everyone once.
 Verify the install with the suite, which needs nothing beyond `uv`:
 
     ./run-tests.sh
+
+### Wiring `recall` into a prompt hook
+
+`recall` is built for a `UserPromptSubmit` hook, and the prompt does **not**
+arrive in the environment — Claude Code hands hooks a JSON object on stdin, so
+`$PROMPT` is empty and the hook silently recalls nothing. Measured against a
+store holding one matching fact: the `$PROMPT` form produced 0 bytes, the form
+below produced 416. Read the prompt out of stdin instead:
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{
+    "hooks": [{
+      "type": "command",
+      "command": "~/.claude/skills/knowledge/bin/knowledge recall \"$(jq -r .prompt)\" --quiet 2>/dev/null || true",
+      "timeout": 10
+    }]
+  }]
+}
+```
+
+Use the absolute path — a hook's `PATH` is not your shell's. `|| true` keeps a
+broken recall from blocking prompt submission, and `recall` prints nothing and
+exits 0 when nothing clears the gate, so the quiet case costs one process.
+Measured at 0.08-0.18s per prompt on a small store.
 
 ## Why two tiers
 
