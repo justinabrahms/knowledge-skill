@@ -12,9 +12,70 @@ hold for yours. `knowledge tune` derives your own.*
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
     knowledge dupes                      # group near-duplicate candidates for review
     knowledge confirm <id> | reject <id> --reason "duplicate of <survivor>"
-    knowledge recall "$PROMPT" --quiet   # gated retrieval, for a prompt hook
+    knowledge recall "<prompt>" --quiet  # gated retrieval, for a prompt hook
     knowledge usage --unread             # which stored facts nothing ever reads
     knowledge tune                       # derive thresholds from your own review history
+
+## Install
+
+It is a Claude skill, so it installs by being cloned where Claude looks for one —
+`~/.claude/skills/` for every project on the machine, or `.claude/skills/` inside
+one repo. The directory name is what the skill is called; `SKILL.md` at its root
+is what makes it discoverable.
+
+    git clone https://github.com/justinabrahms/knowledge-skill.git \
+        ~/.claude/skills/knowledge
+
+Requirements are `uv` and Python ≥3.11. The CLI declares its own dependencies
+inline and is run with `uv run --script`, so there is nothing to install into an
+environment. `qmd`, if present, adds a semantic check to `knowledge add`; without
+it that check is skipped with a warning.
+
+Nothing else is needed for an agent to use it — `SKILL.md` tells the agent to
+invoke `$CLAUDE_SKILL_DIR/bin/knowledge` by absolute path. **The commands in this
+README are written as bare `knowledge`, which assumes a symlink you have to make
+yourself:**
+
+    ln -s ~/.claude/skills/knowledge/bin/knowledge ~/.local/bin/knowledge
+
+Then create a store and check what it resolved to:
+
+    knowledge init
+    knowledge config        # prints the store and the file that decided it
+
+Run `knowledge config` before filing anything. The store is found by walking up
+from the working directory, so a clone that sits under a directory already
+carrying a `.knowledge.yml` inherits that store — including this one. That is the
+intended mechanism and it surprises everyone once.
+
+Verify the install with the suite, which needs nothing beyond `uv`:
+
+    ./run-tests.sh
+
+### Wiring `recall` into a prompt hook
+
+`recall` is built for a `UserPromptSubmit` hook, and the prompt does **not**
+arrive in the environment — Claude Code hands hooks a JSON object on stdin, so
+`$PROMPT` is empty and the hook silently recalls nothing. Measured against a
+store holding one matching fact: the `$PROMPT` form produced 0 bytes, the form
+below produced 416. Read the prompt out of stdin instead:
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{
+    "hooks": [{
+      "type": "command",
+      "command": "~/.claude/skills/knowledge/bin/knowledge recall \"$(jq -r .prompt)\" --quiet 2>/dev/null || true",
+      "timeout": 10
+    }]
+  }]
+}
+```
+
+Use the absolute path — a hook's `PATH` is not your shell's. `|| true` keeps a
+broken recall from blocking prompt submission, and `recall` prints nothing and
+exits 0 when nothing clears the gate, so the quiet case costs one process.
+Measured at 0.08-0.18s per prompt on a small store.
 
 ## Why two tiers
 
@@ -203,7 +264,7 @@ run with `uv`. `qmd` is optional — if present it adds a semantic check to
 
     ./run-tests.sh
 
-73 tests, weighted toward the failures that actually occurred while this was
+79 tests, weighted toward the failures that actually occurred while this was
 built rather than toward line coverage:
 
 - a tokenizer that kept `per-cluster` whole and so never matched a paraphrase

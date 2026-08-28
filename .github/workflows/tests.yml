@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The suite asserts against CLI output, and rich only styles when it
+        # thinks something is watching. A literal that straddles a number passes
+        # on a bare terminal and fails under FORCE_COLOR, which every agent
+        # harness sets — so both environments are the gate, not just the quiet
+        # one. See `plain()` in tests/test_knowledge.py.
+        colour: [bare, forced]
+    name: pytest (${{ matrix.colour }} terminal)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Run the suite
+        env:
+          FORCE_COLOR: ${{ matrix.colour == 'forced' && '3' || '' }}
+        run: ./run-tests.sh
