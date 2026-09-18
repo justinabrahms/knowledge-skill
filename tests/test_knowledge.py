@@ -20,10 +20,12 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 import json
+import frontmatter
 
 import pytest
 import yaml
@@ -107,6 +109,9 @@ def add_fact(store: Path, fid: str, body: str, **fm) -> Path:
              "valid_until": None, "invalidated_at": fm.get("invalidated_at"),
              "invalidation_reason": None, "confidence": fm.get("confidence", "high"),
              "source": "test"}
+    for key, value in fm.items():
+        if key not in {"topic", "scope", "invalidated_at", "confidence"}:
+            front[key] = value
     p = store / f"{fid}.md"
     p.write_text("---\n" + yaml.safe_dump(front, sort_keys=False) + "---\n\n" + body + "\n")
     return p
@@ -118,6 +123,9 @@ def add_candidate(store: Path, pid: str, text: str, **fields) -> Path:
            "provenance": fields.get("provenance", "inferred"),
            "evidence": fields.get("evidence", ""), "source": "test",
            "proposed_at": "2026-01-01"}
+    for key, value in fields.items():
+        if key not in {"topic", "scope", "confidence", "provenance", "evidence"}:
+            rec[key] = value
     p = store / "pending" / f"{pid}.yml"
     p.write_text(yaml.safe_dump(rec, sort_keys=False))
     return p
@@ -873,3 +881,193 @@ class TestOnlyFactsAreFacts:
         add_fact(store, "real-one", "A stored claim.")
         (store / "AGENTS-knowledge.md").write_text("# protocol\n")
         assert [fid for fid, _ in k.all_facts()] == ["real-one"]
+
+
+# ------------------------------------------------------ episodes / graph v2
+
+class TestEpisodeIngestion:
+    def test_ingest_is_append_only_and_does_not_dedupe(self, store):
+        from typer.testing import CliRunner
+        runner = CliRunner()
+        for _ in range(2):
+            res = runner.invoke(k.app, ["ingest", "The same observation.", "--quiet"])
+            assert res.exit_code == 0, res.output
+        episodes = k.all_episodes()
+        assert len(episodes) == 2
+        assert episodes[0][0] != episodes[1][0]
+        assert all(data["trusted"] is False for _, data in episodes)
+
+    def test_propose_creates_and_links_an_episode(self, store):
+        from typer.testing import CliRunner
+        res = CliRunner().invoke(k.app, [
+            "propose", "Deployments use GitOps.", "--topic", "deploy",
+            "--evidence", "config/deploy.yaml:12",
+        ])
+        assert res.exit_code == 0, res.output
+        candidate = yaml.safe_load(next((store / "pending").glob("*.yml")).read_text())
+        assert len(candidate["episodes"]) == 1
+        assert {eid for eid, _ in k.all_episodes()} == set(candidate["episodes"])
+
+    def test_episode_get_is_clearly_untrusted(self, store):
+        from typer.testing import CliRunner
+        eid = CliRunner().invoke(k.app, ["ingest", "Raw source.", "--quiet"]).stdout.strip()
+        res = CliRunner().invoke(k.app, ["get", eid])
+        assert "UNTRUSTED EPISODE" in res.stdout
+        assert "Raw source" in res.stdout
+
+
+class TestTypedAssertionsAndGraph:
+    def test_confirm_preserves_typed_temporal_and_repo_fields(self, store):
+        from typer.testing import CliRunner
+        runner = CliRunner()
+        res = runner.invoke(k.app, [
+            "propose", "Widgets owns checkout.", "--topic", "ownership",
+            "--subject", "service:checkout", "--predicate", "owned_by",
+            "--object", "team:widgets", "--valid-from", "2026-01-01",
+            "--valid-to", "2027-01-01", "--repo", "acme/checkout",
+            "--id", "checkout-owner",
+        ])
+        assert res.exit_code == 0, res.output
+        res = runner.invoke(k.app, ["confirm", "checkout-owner"])
+        assert res.exit_code == 0, res.output
+        post = frontmatter.load(store / "checkout-owner.md")
+        assert post["subject"] == "service:checkout"
+        assert post["predicate"] == "owned_by"
+        assert post["object"] == "team:widgets"
+        assert post["valid_from"] == "2026-01-01"
+        assert post["valid_to"] == "2027-01-01"
+        assert post["repo"] == "acme/checkout"
+        assert post["epistemic_status"] == "supported"
+
+    def test_graph_projection_is_external_and_contains_edges(self, store):
+        from typer.testing import CliRunner
+        cache = store.parent / "cache"
+        write_config(store, graph_cache=str(cache))
+        add_fact(
+            store, "owner", "Widgets owns checkout.",
+            subject="service:checkout", predicate="owned_by", object="team:widgets",
+            epistemic_status="supported",
+        )
+        res = CliRunner().invoke(k.app, ["graph-rebuild", "--json"])
+        assert res.exit_code == 0, res.output
+        payload = json.loads(res.stdout)
+        graph = Path(payload["path"])
+        assert graph.is_file()
+        assert store not in graph.parents
+        assert payload["entities"] == 2
+        assert payload["edges"] == 1
+
+        conn = k.sqlite3.connect(graph)
+        assert conn.execute("SELECT subject,predicate,object FROM edges").fetchone() == (
+            "service:checkout", "owned_by", "team:widgets")
+        conn.close()
+
+    def test_neighbors_excludes_pending_unless_requested(self, store):
+        from typer.testing import CliRunner
+        write_config(store, graph_cache=str(store.parent / "cache"))
+        add_fact(store, "owner", "Widgets owns checkout.", subject="service:checkout",
+                 predicate="owned_by", object="team:widgets")
+        add_candidate(store, "candidate", "Checkout deploys to prod.",
+                      subject="service:checkout", predicate="deployed_to", object="env:prod")
+        runner = CliRunner()
+        plain = json.loads(runner.invoke(
+            k.app, ["graph-neighbors", "service:checkout", "--json"]).stdout)
+        with_pending = json.loads(runner.invoke(
+            k.app, ["graph-neighbors", "service:checkout", "--pending", "--json"]).stdout)
+        assert {x["id"] for x in plain} == {"owner"}
+        assert {x["id"] for x in with_pending} == {"owner", "candidate"}
+
+    def test_neighbors_excludes_invalidated_assertions(self, store):
+        from typer.testing import CliRunner
+        write_config(store, graph_cache=str(store.parent / "cache"))
+        add_fact(store, "old-owner", "Widgets owns checkout.",
+                 subject="service:checkout", predicate="owned_by", object="team:widgets",
+                 invalidated_at="2026-01-02")
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["graph-neighbors", "service:checkout", "--json"]).stdout)
+        assert rows == []
+
+
+class TestRepoAndDateAwareRetrieval:
+    def test_search_defaults_to_current_repo_and_keeps_global_facts(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "here", "Checkout uses GitOps.", repo="acme/checkout")
+        add_fact(store, "elsewhere", "Checkout uses GitOps elsewhere.", repo="acme/other")
+        add_fact(store, "global", "GitOps is the deployment convention.")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "acme/checkout")
+        monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["search", "gitops deployment", "--json"]).stdout)
+        assert {row["id"] for row in rows} == {"here", "global"}
+
+    def test_search_respects_valid_time(self, store):
+        from typer.testing import CliRunner
+        add_fact(store, "old", "Widgets owns checkout.", valid_from="2025-01-01",
+                 valid_to="2026-01-01")
+        add_fact(store, "new", "Platform owns checkout.", valid_from="2026-01-01")
+        old = json.loads(CliRunner().invoke(
+            k.app, ["search", "owns checkout", "--as-of", "2025-06-01", "--json"]).stdout)
+        assert {row["id"] for row in old} == {"old"}
+        new = json.loads(CliRunner().invoke(
+            k.app, ["search", "owns checkout", "--as-of", "2026-06-01", "--json"]).stdout)
+        assert {row["id"] for row in new} == {"new"}
+
+    def test_refuted_assertions_never_recall(self, store):
+        from typer.testing import CliRunner
+        add_fact(store, "dead", "Kargo promotes freight.", epistemic_status="refuted")
+        res = CliRunner().invoke(k.app, ["recall", "how does kargo promote freight", "--json"])
+        assert json.loads(res.stdout)["hits"] == []
+
+
+class TestSweeper:
+    def _git_repo(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "checkout"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+        (repo / "deploy.yaml").write_text("mode: gitops\n")
+        subprocess.run(["git", "add", "deploy.yaml"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=repo, check=True)
+        return repo
+
+    def test_sweep_supports_then_refutes_against_git(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+        repo = self._git_repo(tmp_path)
+        monkeypatch.chdir(repo)
+        add_fact(
+            store, "deploy-file", "The repository contains deploy.yaml.",
+            repo="acme/widgets", subject="repo:acme/widgets", predicate="contains_path",
+            object="path:deploy.yaml", repo_path="deploy.yaml",
+            validator={"type": "git-path", "path": "deploy.yaml"},
+            epistemic_status="unknown",
+        )
+        runner = CliRunner()
+        res = runner.invoke(k.app, ["sweep", "deploy-file", "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        assert json.loads(res.stdout)[0]["outcome"] == "supported"
+        assert frontmatter.load(store / "deploy-file.md")["epistemic_status"] == "supported"
+
+        (repo / "deploy.yaml").unlink()
+        subprocess.run(["git", "add", "-u"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "remove deploy file"], cwd=repo, check=True)
+        res = runner.invoke(k.app, ["sweep", "deploy-file", "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        assert json.loads(res.stdout)[0]["outcome"] == "contradicted"
+        post = frontmatter.load(store / "deploy-file.md")
+        assert post["epistemic_status"] == "refuted"
+        assert len(k.read_jsonl(k.VALIDATION_LOG_NAME)) == 2
+
+    def test_missing_checkout_becomes_unknown_not_refuted(self, store):
+        from typer.testing import CliRunner
+        add_fact(
+            store, "missing", "The repository contains deploy.yaml.",
+            repo="acme/missing", subject="repo:acme/missing", predicate="contains_path",
+            object="path:deploy.yaml", repo_path="deploy.yaml",
+            validator={"type": "git-path", "path": "deploy.yaml"},
+        )
+        res = CliRunner().invoke(k.app, ["sweep", "missing", "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        assert json.loads(res.stdout)[0]["outcome"] == "unknown"
+        assert frontmatter.load(store / "missing.md")["epistemic_status"] == "unknown"

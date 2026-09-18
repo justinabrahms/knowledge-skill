@@ -1,94 +1,120 @@
 ---
 name: knowledge
-description: Query and update an agent-maintained atomic-fact store via the `knowledge` CLI. Use when answering or making assumptions about infrastructure, team or service ownership, deployment topology, tooling decisions, team practices, or user preferences — anything where a stored canonical fact might exist. Also use to queue new facts and to invalidate facts when you observe a contradiction.
+description: Query and update an external, repo-aware, temporal knowledge graph through the `knowledge` CLI. Use for durable organizational facts, ownership, topology, conventions, decisions, or user preferences; for capturing source episodes; and when stored assertions need validation or refutation.
 ---
 
-# knowledge — atomic-fact store
+# knowledge — external temporal knowledge graph
 
-One fact per markdown file, schema-validated frontmatter, tf-idf duplicate
-detection. Nothing about a particular organisation is compiled in: the store
-location, scope vocabulary, similarity thresholds, and identifier classes come
-from a `.knowledge.yml` found by walking up from the working directory.
+The store and generated SQLite graph live outside every repository they
+describe. Repository awareness comes from canonical `owner/repo`, commit, path,
+and typed-entity references. Never create knowledge files or indexes inside an
+application repository.
 
-CLI: `bin/knowledge` in this skill directory. Invoke it by absolute path —
-do not assume it is on `PATH`.
+CLI: `~/bin/knowledge` (a symlink to this repository's `bin/knowledge`). Use the
+absolute path in hooks. Run `knowledge config` before writing when store
+selection is uncertain.
 
-    "$CLAUDE_SKILL_DIR/bin/knowledge" topics
+## Three layers
 
-If no store is configured, `knowledge init` creates one. Run `knowledge --help`
-for the full command list; the paragraphs below are the parts that are not
-obvious from the help text.
+| Layer | Command | Trust |
+|---|---|---|
+| Episode | `knowledge ingest` | Untrusted raw evidence |
+| Candidate assertion | `knowledge propose` | Unvetted lead |
+| Confirmed assertion | `knowledge confirm` | Citable subject to status and time |
 
-## Read before you assert
+The boundary is enforced at retrieval. Episodes and candidates never enter
+unattended recall, so ingestion does not need a numeric rate limit.
 
-The store is worthless if it is not consulted. Before asserting ownership,
-topology, conventions, or "how do we do X here", check:
+## Capture without throwing observations away
 
-- `knowledge recall "<the prompt>"` — the gated lookup a prompt hook runs. If a
-  `# Recalled facts` block is already in your context, those facts are loaded;
-  do not re-fetch them. It is not exhaustive, so a thin block is not evidence
-  that nothing is stored — fall through to the rest of this list.
-- `knowledge search "<query>"` — ungated ranking, for when you are the one asking
-- `knowledge topics` — what subject areas exist, with fact counts
-- `knowledge list --topic <t>` — ids, scope, confidence, staleness in one topic
-- `knowledge get <id>` — full body and frontmatter
-- `knowledge index --topic <t>` — one line per fact; `--all` grows with the store
+Use `ingest` silently for potentially reusable source material. It is
+append-only and deliberately has no dedupe gate:
 
-Frontmatter is load-bearing. `confidence: low` is a hint, not authority.
-A `last_verified_at` past `stale_days`, or a `valid_until` in the past, means
-surface the fact **and** flag the staleness rather than relying on it silently.
-`invalidated_at` set means do not use it at all — the file survives only for
-audit. Provenance predicts reliability better than confidence, because
-confidence is self-assigned by whatever wrote the fact.
+```bash
+knowledge ingest "<observation or quote>" \
+  --kind observation --source "<source>" \
+  [--repo owner/name] [--revision <sha>] [--path <repo-relative-path>]
+```
 
-## Write only to the queue
+Do not ingest secrets, credentials, one-off task status, or narrative reasoning.
+Long-form investigation belongs in session notes.
 
-`knowledge propose` is the only write you make. `add`, `confirm`, and `reject`
-belong to the human.
+Use `propose` for an atomic assertion worth retrieving later. Link existing
+episodes with repeatable `--episode`; without one, `propose` creates an episode
+from its evidence automatically.
 
-    knowledge propose "<one sentence>" --topic <t> \
-      --provenance user-stated|inferred --evidence "<quote or path:line>"
+```bash
+knowledge propose "<one sentence>" --topic <t> \
+  --provenance user-stated|inferred --evidence "<quote or source>" \
+  [--subject service:checkout --predicate owned_by --object team:widgets] \
+  [--valid-from YYYY-MM-DD] [--valid-to YYYY-MM-DD]
+```
 
-Capture liberally — rejecting a candidate at review is cheaper than re-deriving
-a lost fact three times. Duplicates get filtered on the review end by
-`knowledge dupes`, so do not hold back out of tidiness. Propose silently: no
-questions, no "should I save this?".
+For `user-stated`, quote the person. For `inferred`, give evidence that can be
+checked without repeating the investigation. Capture liberally; consolidation,
+trust-aware retrieval, and sweeping control quality after ingestion.
 
-Candidates land as `.yml` in `pending/` specifically so a markdown indexer never
-picks them up. That is the safety property of the whole design — unreviewed
-output can accumulate for months without contaminating what agents read back as
-fact. Never propose a fact derived from an unconfirmed candidate; that launders
-inference into the store one hop at a time.
+`add`, `confirm`, and `reject` remain human operations. Never cite an episode or
+candidate as established, and never derive a new citable assertion solely from
+an unconfirmed candidate.
 
-`--evidence` is what makes review a one-second decision, and it is stored on the
-fact rather than discarded at promotion — so it stays the thing that lets a
-future reader re-check the claim without redoing the work. For `user-stated`,
-quote the person. For `inferred`, give the file and line. An inferred candidate a
-reviewer cannot verify from its evidence line is worse than no candidate.
+## Read before asserting
 
-## When you find the store is wrong
+Before asserting ownership, topology, conventions, or “how do we do X”, check:
 
-    knowledge invalidate <id> --reason "<what you actually observed>"
+- `knowledge recall "<prompt>"` — gated hook lookup; automatically scopes to the
+  current repository when run in a checkout.
+- `knowledge search "<query>"` — explicit ranking; supports `--repo`,
+  `--all-repos`, and `--as-of`.
+- `knowledge topics` / `knowledge list --topic <t>` / `knowledge get <id>`.
+- `knowledge graph-neighbors <entity> [--depth 1..3]` for typed relations.
 
-Then propose the replacement. Say one line about it. Do not silently work around
-a stale fact — the next session will hit the same wall.
+Repository-specific assertions for other repositories are excluded by default;
+org/global assertions remain eligible. Commit-validity fields are evaluated
+against the current checkout when available.
 
-## Reviewing (human-driven)
+Treat metadata as load-bearing:
 
-`knowledge dupes` groups near-duplicate candidates so a reviewer decides once
-per cluster instead of once per candidate. Treat duplicate clusters as a
-correctness signal: when several candidates restate one claim while naming
-*different* magnitudes for the same quantity, most of them are wrong, and the
-merged fact should usually state no number rather than pick one.
+- `confidence: low` is a hint, not authority.
+- `epistemic_status: unknown|contested` must be surfaced with the assertion.
+- `refuted`, `superseded`, or `invalidated_at` assertions are not retrievable.
+- `valid_from`/`valid_to` are world time; `recorded_at` and validation events are
+  system time. `--as-of` queries world time.
+- A stale assertion must be flagged or swept before relying on it.
 
-Nothing is destroyed by review hygiene: `prune-pending` moves aged-out
-candidates and old rejections into `pending/archived/` instead of deleting them,
-and archived entries are out of the duplicate corpus, so a claim that matters
-again can simply be proposed again.
+## Validation and refutation
 
-`knowledge usage` answers whether any of this is working — per-fact read counts,
-recall hit rate, and the facts nothing has ever surfaced.
+Typed assertions can carry deterministic validator specifications. Current
+built-ins are `git-path` for `contains_path`/`has_path` relations and
+`git-file-contains` for literal source evidence.
 
-Reject with a reason that names the surviving fact. That blocks re-proposal, and
-it is the labelled data `knowledge tune` uses to derive thresholds from your own
-review history rather than from someone else's corpus.
+```bash
+knowledge propose "The repo contains deploy.yaml." --topic deploy \
+  --repo acme/widgets \
+  --subject repo:acme/widgets --predicate contains_path --object path:deploy.yaml \
+  --repo-path deploy.yaml --validator git-path
+
+knowledge sweep                         # every validator-backed assertion
+knowledge sweep <id>                    # one assertion
+knowledge sweep --repo acme/widgets --stale-only
+```
+
+Sweeps append validation observations and update epistemic state:
+
+- authoritative agreement → `supported` and refreshed verification time;
+- authoritative contradiction → `refuted`;
+- unavailable repository/source or insufficient structure → `unknown`, never
+  refuted.
+
+If you independently observe a contradiction where no validator applies, run
+`knowledge invalidate <id> --reason "<what contradicted it>"`, then ingest the
+evidence and propose the replacement.
+
+## Graph projection
+
+`knowledge graph-rebuild` materializes entities, typed assertion edges,
+episodes, and validation history into an external SQLite cache. It is disposable
+and rebuilt from the store; never treat it as the source of truth.
+
+`knowledge usage` reports whether retrieval is effective. `knowledge dupes` and
+`knowledge tune` use review outcomes to improve consolidation thresholds.

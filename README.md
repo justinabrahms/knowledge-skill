@@ -1,7 +1,9 @@
 # knowledge
 
-An atomic-fact store for agent memory. One fact per markdown file, schema-checked
-frontmatter, and duplicate detection that survives paraphrase.
+An external, repo-aware temporal knowledge graph for agent memory. Raw episodes
+are append-only, assertions remain human-readable Markdown, and a disposable
+SQLite projection provides typed graph traversal without putting memory state in
+the repositories it describes.
 
 *Every measured number below — similarity scores, threshold values, queue sizes —
 comes from one private store built by one person. They are offered as evidence
@@ -9,7 +11,10 @@ that the design decisions were made against real data, not as defaults that will
 hold for yours. `knowledge tune` derives your own.*
 
     knowledge init                       # writes .knowledge.yml + the store + the agent protocol
+    knowledge ingest "raw observation"   # unlimited, untrusted evidence capture
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
+    knowledge sweep                      # validate/refute deterministic assertions
+    knowledge graph-neighbors repo:acme/widgets
     knowledge dupes                      # group near-duplicate candidates for review
     knowledge confirm <id> | reject <id> --reason "duplicate of <survivor>"
     knowledge recall "<prompt>" --quiet  # gated retrieval, for a prompt hook
@@ -18,25 +23,26 @@ hold for yours. `knowledge tune` derives your own.*
 
 ## Install
 
-It is a Claude skill, so it installs by being cloned where Claude looks for one —
-`~/.claude/skills/` for every project on the machine, or `.claude/skills/` inside
-one repo. The directory name is what the skill is called; `SKILL.md` at its root
-is what makes it discoverable.
+It installs as a Claude or Codex skill. Clone it into the global skill directory
+for the agent you use; the directory name is the skill name and `SKILL.md` at its
+root is the discovery entry point.
 
     git clone https://github.com/justinabrahms/knowledge-skill.git \
         ~/.claude/skills/knowledge
+
+For Codex, use `~/.codex/skills/knowledge` instead.
 
 Requirements are `uv` and Python ≥3.11. The CLI declares its own dependencies
 inline and is run with `uv run --script`, so there is nothing to install into an
 environment. `qmd`, if present, adds a semantic check to `knowledge add`; without
 it that check is skipped with a warning.
 
-Nothing else is needed for an agent to use it — `SKILL.md` tells the agent to
-invoke `$CLAUDE_SKILL_DIR/bin/knowledge` by absolute path. **The commands in this
-README are written as bare `knowledge`, which assumes a symlink you have to make
+`SKILL.md` expects the stable `~/bin/knowledge` entry point. **The commands in
+this README are written as bare `knowledge`, which assumes a symlink you make
 yourself:**
 
-    ln -s ~/.claude/skills/knowledge/bin/knowledge ~/.local/bin/knowledge
+    mkdir -p ~/bin
+    ln -s ~/.claude/skills/knowledge/bin/knowledge ~/bin/knowledge
 
 Then create a store and check what it resolved to:
 
@@ -77,16 +83,57 @@ broken recall from blocking prompt submission, and `recall` prints nothing and
 exits 0 when nothing clears the gate, so the quiet case costs one process.
 Measured at 0.08-0.18s per prompt on a small store.
 
-## Why two tiers
+### Wiring capture into a stop hook
 
-Agents write to a queue (`pending/*.yml`); humans promote into the store
-(`*.md`). The queue is YAML in a subdirectory on purpose: a markdown indexer
-never sees it, so unreviewed model output can accumulate indefinitely without
-contaminating what agents read back as fact.
+`hooks/knowledge-capture-stop.sh` asks the agent to append reusable source
+episodes and queue durable assertions silently after a session has run long
+enough. It deliberately carries no numeric capture cap; episodes remain
+untrusted and cannot enter recall. Install or reference that script from the
+harness's Stop hook rather than copying its prompt into multiple configs.
 
-That property earned its keep. In the store this tool was extracted from, 198
-unvetted candidates piled up over six weeks without a single one being reviewed
-— and retrieval was never affected, because nothing could reach them.
+## Why three layers
+
+Agents append raw episodes (`episodes/**/*.yml`) without a numeric cap, derive
+candidate assertions into a queue (`pending/*.yml`), and humans promote
+assertions into the store (`*.md`). Deterministic validators subsequently
+maintain support/refutation state. Episodes and candidates
+are YAML outside the Markdown fact set on purpose: unreviewed model output can
+accumulate indefinitely without contaminating unattended recall.
+
+This separates ingestion volume from trust. Losing an observation is no longer
+the mechanism that keeps recall clean; retrieval only serves confirmed,
+non-refuted assertions.
+
+## External and repository-aware
+
+The store and graph index are external to application repositories. A checkout
+is read-only evidence and supplies canonical `owner/repo`, `HEAD`, branch, path,
+and commit ancestry. `search` and `recall` automatically use the current repo as
+context: assertions about another repo are excluded unless `--all-repos` is
+passed, while org/global assertions remain eligible.
+
+`knowledge init` defaults the store to `~/.local/share/knowledge`; the SQLite
+projection defaults to `~/.cache/knowledge/<store-hash>/graph.sqlite3`.
+`.knowledge.yml` may sit above a tree of checkouts as a pointer, but no fact,
+episode, validation log, or graph database is written into those checkouts.
+
+## Temporal assertions and sweeping
+
+Assertions may carry typed `subject` / `predicate` / `object`, world-validity
+(`valid_from`, exclusive `valid_to`), commit-validity, evidence revision/path,
+and an `epistemic_status`. `search --as-of` and `recall --as-of` query world time;
+commit intervals are checked against the current checkout when available.
+
+`knowledge sweep` runs deterministic validators and appends every result to
+`.validations.jsonl`. Agreement marks an assertion `supported`, authoritative
+contradiction marks it `refuted`, and an unavailable checkout or insufficiently
+structured assertion marks it `unknown` — never refuted. The first built-ins are
+`git-path` and `git-file-contains`.
+
+`knowledge graph-rebuild` projects assertions, entities, episodes, and
+validation history into SQLite. `graph-neighbors` traverses typed assertions up
+to three hops. The projection is disposable; Markdown/YAML plus append-only logs
+remain the source of truth.
 
 ## Retrieval
 
@@ -264,7 +311,7 @@ run with `uv`. `qmd` is optional — if present it adds a semantic check to
 
     ./run-tests.sh
 
-79 tests, weighted toward the failures that actually occurred while this was
+91 tests, weighted toward the failures that actually occurred while this was
 built rather than toward line coverage:
 
 - a tokenizer that kept `per-cluster` whole and so never matched a paraphrase
@@ -282,6 +329,10 @@ built rather than toward line coverage:
 - the test suite itself reading the developer's real `~/.config/knowledge`:
   `tune --write` wrote thresholds derived from synthetic fixtures into a live
   config before an autouse fixture isolated it
+- unlimited episode ingestion remaining untrusted and outside recall
+- typed assertion fields surviving proposal/confirmation and graph projection
+- repo/date filtering, external graph placement, and deterministic sweep state
+  transitions from supported to refuted or unknown
 
 Each of those was checked by mutation: reverting the fix makes the corresponding
 test fail. A test that passes against broken code is not evidence.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Knowledge"
+  short_description: "External temporal knowledge graph"
+  default_prompt: "Use $knowledge to capture evidence, query repo- and date-aware assertions, and validate or refute stored facts."
