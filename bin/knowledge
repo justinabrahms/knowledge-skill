@@ -581,7 +581,7 @@ def migrate_episode(
     data,
     *,
     dry_run: bool,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, bool]:
     """Create one stable, untrusted source episode for a legacy assertion.
 
     The deterministic ID makes migration idempotent. The assertion body is
@@ -591,44 +591,60 @@ def migrate_episode(
     digest = hashlib.sha256(f"{assertion_kind}:{assertion_id}".encode()).hexdigest()[:16]
     eid = f"ep-migrated-{assertion_kind}-{digest}"
     dest = episodes_dir(create=not dry_run) / "migrated" / f"{eid}.yml"
-    if dest.exists():
-        return eid, False
-    if dry_run:
-        return eid, True
-    observed_at = utc_now_iso()
-    evidence = str(data.get("evidence") or data.get("source") or "")
-    record = {
-        "id": eid,
+    evidence = str(data.get("evidence") or "")
+    source = evidence or str(data.get("source") or f"legacy {assertion_kind} assertion {assertion_id}")
+    desired = {
         "kind": "legacy-assertion",
         "text": evidence or text,
-        "source": evidence or f"legacy {assertion_kind} assertion {assertion_id}",
-        "observed_at": observed_at,
-        "reference_time": migration_reference_time(data) or observed_at,
+        "source": source,
+        "reference_time": migration_reference_time(data),
         "repo": str(data.get("repo") or ""),
         "revision": str(data.get("repo_revision") or ""),
-        "branch": "",
         "path": str(data.get("repo_path") or ""),
-        "cwd": "",
         "trusted": False,
         "migration": {"assertion_kind": assertion_kind, "assertion_id": assertion_id},
     }
+    if dest.exists():
+        try:
+            existing = yaml.safe_load(dest.read_text()) or {}
+        except yaml.YAMLError:
+            existing = {}
+        updates = {key: value for key, value in desired.items()
+                   if existing.get(key) != value and value != ""}
+        if updates and not dry_run:
+            existing.update(updates)
+            write_yaml(dest, existing)
+            append_event("episode.migration_repaired", eid, assertion_id=assertion_id)
+        return eid, False, bool(updates)
+    if dry_run:
+        return eid, True, False
+    observed_at = utc_now_iso()
+    record = {
+        "id": eid,
+        **desired,
+        "observed_at": observed_at,
+        "reference_time": desired["reference_time"] or observed_at,
+        "branch": "",
+        "cwd": "",
+    }
     write_yaml(dest, record)
     append_event("episode.migrated", eid, assertion_id=assertion_id, assertion_kind=assertion_kind)
-    return eid, True
+    return eid, True, False
 
 
 def migrate_legacy_store(*, include_pending: bool, dry_run: bool) -> dict[str, int]:
     """Backfill additive graph metadata without inferring semantic relations."""
-    counts = {"facts_changed": 0, "pending_changed": 0, "episodes_created": 0}
+    counts = {"facts_changed": 0, "pending_changed": 0, "episodes_created": 0, "episodes_updated": 0}
 
     for fid, post in all_facts():
         changed = False
         episodes = post.get("episodes")
+        eid, created, updated = migrate_episode("fact", fid, post.content, post, dry_run=dry_run)
+        counts["episodes_created"] += int(created)
+        counts["episodes_updated"] += int(updated)
         if not isinstance(episodes, list) or not episodes:
-            eid, created = migrate_episode("fact", fid, post.content, post, dry_run=dry_run)
             episodes = [eid]
             changed = True
-            counts["episodes_created"] += int(created)
         if not post.get("recorded_at"):
             post["recorded_at"] = utc_now_iso()
             changed = True
@@ -648,13 +664,14 @@ def migrate_legacy_store(*, include_pending: bool, dry_run: bool) -> dict[str, i
         for pid, data in all_pending():
             changed = False
             episodes = data.get("episodes")
+            eid, created, updated = migrate_episode(
+                "pending", pid, str(data.get("text") or ""), data, dry_run=dry_run,
+            )
+            counts["episodes_created"] += int(created)
+            counts["episodes_updated"] += int(updated)
             if not isinstance(episodes, list) or not episodes:
-                eid, created = migrate_episode(
-                    "pending", pid, str(data.get("text") or ""), data, dry_run=dry_run,
-                )
                 episodes = [eid]
                 changed = True
-                counts["episodes_created"] += int(created)
             if not data.get("recorded_at"):
                 data["recorded_at"] = str(data.get("proposed_at") or utc_now_iso())
                 changed = True
@@ -1796,7 +1813,8 @@ def cmd_migrate(
     mode = "Would migrate" if dry_run else "Migrated"
     console.print(
         f"[green]{mode}[/green] facts={counts['facts_changed']} "
-        f"pending={counts['pending_changed']} episodes={counts['episodes_created']}"
+        f"pending={counts['pending_changed']} episodes={counts['episodes_created']} "
+        f"repaired={counts['episodes_updated']}"
     )
     if graph_counts:
         console.print("[dim]Graph rebuilt: " + "  ".join(

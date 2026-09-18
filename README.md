@@ -318,7 +318,7 @@ run with `uv`. `qmd` is optional — if present it adds a semantic check to
 
     ./run-tests.sh
 
-92 tests, weighted toward the failures that actually occurred while this was
+93 tests, weighted toward the failures that actually occurred while this was
 built rather than toward line coverage:
 
 - a tokenizer that kept `per-cluster` whole and so never matched a paraphrase

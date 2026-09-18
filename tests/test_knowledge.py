@@ -925,13 +925,15 @@ class TestEpisodeIngestion:
         first = runner.invoke(k.app, ["migrate", "--no-rebuild-graph", "--json"])
         assert first.exit_code == 0, first.output
         assert json.loads(first.stdout) == {
-            "facts_changed": 1, "pending_changed": 1, "episodes_created": 2,
+            "facts_changed": 1, "pending_changed": 1, "episodes_created": 2, "episodes_updated": 0,
             "dry_run": False, "graph": {},
         }
         post = frontmatter.load(store / "legacy.md")
         candidate = yaml.safe_load((store / "pending" / "legacy-candidate.yml").read_text())
         assert post["epistemic_status"] == "supported"
         assert post["recorded_at"]
+        episode = dict(k.all_episodes())[post["episodes"][0]]
+        assert episode["text"] == "old-doc.md:10"
         assert candidate["recorded_at"] == "2025-02-01"
         assert len(post["episodes"]) == len(candidate["episodes"]) == 1
         assert len(k.all_episodes()) == 2
@@ -941,6 +943,16 @@ class TestEpisodeIngestion:
         assert json.loads(second.stdout)["facts_changed"] == 0
         assert json.loads(second.stdout)["pending_changed"] == 0
         assert json.loads(second.stdout)["episodes_created"] == 0
+
+    def test_migrate_uses_assertion_text_when_legacy_evidence_is_absent(self, store):
+        from typer.testing import CliRunner
+        add_fact(store, "no-evidence", "The legacy assertion body.", source="session-2025-01-01")
+        res = CliRunner().invoke(k.app, ["migrate", "--no-pending", "--no-rebuild-graph", "--json"])
+        assert res.exit_code == 0, res.output
+        post = frontmatter.load(store / "no-evidence.md")
+        episode = dict(k.all_episodes())[post["episodes"][0]]
+        assert episode["text"] == "The legacy assertion body."
+        assert episode["source"] == "session-2025-01-01"
 
 
 class TestTypedAssertionsAndGraph:
