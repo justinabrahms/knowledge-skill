@@ -1194,3 +1194,21 @@ class TestSweeper:
         contradicted = runner.invoke(k.app, ["sweep", "service-owner", "--json"])
         assert contradicted.exit_code == 0, repr(contradicted.exception)
         assert json.loads(contradicted.stdout)[0]["outcome"] == "contradicted"
+
+    def test_sweep_explain_prioritizes_unverified_unknown_assertions(self, store):
+        from typer.testing import CliRunner
+
+        add_fact(store, "old", "Old validator-backed fact.", repo="acme/widgets",
+                 subject="repo:acme/widgets", predicate="contains_path", object="path:old",
+                 repo_path="old", validator={"type": "git-path", "path": "old"},
+                 last_verified_at="2026-01-01", epistemic_status="supported")
+        add_fact(store, "unknown", "Unknown validator-backed fact.", repo="acme/widgets",
+                 subject="repo:acme/widgets", predicate="contains_path", object="path:new",
+                 repo_path="new", validator={"type": "git-path", "path": "new"},
+                 last_verified_at="", epistemic_status="unknown")
+        res = CliRunner().invoke(k.app, ["sweep", "--explain", "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        selection = json.loads(res.stdout)["selection"]
+        assert [row["id"] for row in selection] == ["unknown", "old"]
+        assert "never validated" in selection[0]["reasons"]
+        assert k.read_jsonl(k.VALIDATION_LOG_NAME) == []

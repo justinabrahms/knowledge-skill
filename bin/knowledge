@@ -1539,6 +1539,29 @@ def ensure_graph() -> Path:
 
 # -------- deterministic validation --------
 
+def sweep_priority(post: frontmatter.Post) -> tuple[int, list[str]]:
+    """Rank deterministic validation work without changing assertion state."""
+    stale_days = int(load_config()["stale_days"])
+    verified = str(post.get("last_verified_at") or "")
+    status = str(post.get("epistemic_status") or "unknown")
+    reasons: list[str] = []
+    score = 0
+    if not verified:
+        score += 10_000
+        reasons.append("never validated")
+    else:
+        age = max(days_ago(verified), 0)
+        if age >= stale_days:
+            score += 1_000 + age
+            reasons.append(f"stale for {age}d")
+        else:
+            score += age
+            reasons.append(f"validated {age}d ago")
+    if status == "unknown":
+        score += 500
+        reasons.append("current status unknown")
+    return score, reasons
+
 def run_validator(post: frontmatter.Post) -> tuple[str, str, str]:
     """Return outcome, evidence, detail. Never infer contradiction from outage."""
     spec = post.get("validator")
@@ -2039,10 +2062,11 @@ def cmd_sweep(
     stale_only: bool = typer.Option(False, "--stale-only", help="Only assertions past stale_days."),
     limit: int = typer.Option(100, "--limit", "-n"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    explain: bool = typer.Option(False, "--explain", help="Preview deterministic selection order without validating."),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Revalidate deterministic assertions and retain support/refutation history."""
-    selected: list[tuple[str, frontmatter.Post]] = []
+    selected: list[tuple[str, frontmatter.Post, int, list[str]]] = []
     for fid, post in all_facts():
         if fact_id and fid != fact_id:
             continue
@@ -2054,15 +2078,29 @@ def cmd_sweep(
             verified = str(post.get("last_verified_at") or "")
             if verified and days_ago(verified) < int(load_config()["stale_days"]):
                 continue
-        selected.append((fid, post))
-        if len(selected) >= limit:
-            break
+        score, reasons = sweep_priority(post)
+        selected.append((fid, post, score, reasons))
+    selected.sort(key=lambda row: (-row[2], row[0]))
+    selected = selected[:limit]
     if fact_id and not selected:
         err_console.print(f"[red]No validator-backed assertion:[/red] {fact_id}")
         raise typer.Exit(2)
 
+    if explain:
+        preview = [
+            {"id": fid, "score": score, "reasons": reasons}
+            for fid, _, score, reasons in selected
+        ]
+        if as_json:
+            sys.stdout.write(json.dumps({"selection": preview}, indent=2) + "\n")
+            return
+        for row in preview:
+            console.print(f"[bold]{row['id']}[/bold] score={row['score']} — {', '.join(row['reasons'])}")
+        console.print(f"[dim]{len(preview)} assertion(s) selected; no validation ran[/dim]")
+        return
+
     results = []
-    for fid, post in selected:
+    for fid, post, _, _ in selected:
         outcome, evidence, detail = run_validator(post)
         record_validation(fid, post, outcome, evidence, detail, mutate=not dry_run)
         results.append({"id": fid, "outcome": outcome, "evidence": evidence, "detail": detail})

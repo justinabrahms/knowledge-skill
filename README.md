@@ -16,6 +16,7 @@ hold for yours. `knowledge tune` derives your own.*
     knowledge migrate --dry-run           # inspect legacy-store migration
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
     knowledge sweep                      # validate/refute deterministic assertions
+    knowledge sweep --explain --json     # scheduled-run preview with selection reasons
     knowledge graph-neighbors repo:acme/widgets
     knowledge dupes                      # group near-duplicate candidates for review
     knowledge confirm <id> | reject <id> --reason "duplicate of <survivor>"
