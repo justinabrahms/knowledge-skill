@@ -116,5 +116,9 @@ evidence and propose the replacement.
 episodes, and validation history into an external SQLite cache. It is disposable
 and rebuilt from the store; never treat it as the source of truth.
 
+For an existing legacy store, `knowledge migrate` is an idempotent structural
+backfill. It creates labelled untrusted source episodes and safe metadata
+defaults, but never fabricates typed graph relations from prose.
+
 `knowledge usage` reports whether retrieval is effective. `knowledge dupes` and
 `knowledge tune` use review outcomes to improve consolidation thresholds.

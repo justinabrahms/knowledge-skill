@@ -565,6 +565,108 @@ def write_episode(
     return eid, dest
 
 
+def migration_reference_time(data) -> str:
+    """Best available valid-time hint for a legacy assertion's source episode."""
+    for key in ("learned_at", "proposed_at", "last_verified_at", "recorded_at"):
+        value = str(data.get(key) or "")
+        if value:
+            return value
+    return ""
+
+
+def migrate_episode(
+    assertion_kind: str,
+    assertion_id: str,
+    text: str,
+    data,
+    *,
+    dry_run: bool,
+) -> tuple[str, bool]:
+    """Create one stable, untrusted source episode for a legacy assertion.
+
+    The deterministic ID makes migration idempotent. The assertion body is
+    explicitly labelled as legacy evidence rather than being represented as a
+    newly observed source claim.
+    """
+    digest = hashlib.sha256(f"{assertion_kind}:{assertion_id}".encode()).hexdigest()[:16]
+    eid = f"ep-migrated-{assertion_kind}-{digest}"
+    dest = episodes_dir(create=not dry_run) / "migrated" / f"{eid}.yml"
+    if dest.exists():
+        return eid, False
+    if dry_run:
+        return eid, True
+    observed_at = utc_now_iso()
+    evidence = str(data.get("evidence") or data.get("source") or "")
+    record = {
+        "id": eid,
+        "kind": "legacy-assertion",
+        "text": evidence or text,
+        "source": evidence or f"legacy {assertion_kind} assertion {assertion_id}",
+        "observed_at": observed_at,
+        "reference_time": migration_reference_time(data) or observed_at,
+        "repo": str(data.get("repo") or ""),
+        "revision": str(data.get("repo_revision") or ""),
+        "branch": "",
+        "path": str(data.get("repo_path") or ""),
+        "cwd": "",
+        "trusted": False,
+        "migration": {"assertion_kind": assertion_kind, "assertion_id": assertion_id},
+    }
+    write_yaml(dest, record)
+    append_event("episode.migrated", eid, assertion_id=assertion_id, assertion_kind=assertion_kind)
+    return eid, True
+
+
+def migrate_legacy_store(*, include_pending: bool, dry_run: bool) -> dict[str, int]:
+    """Backfill additive graph metadata without inferring semantic relations."""
+    counts = {"facts_changed": 0, "pending_changed": 0, "episodes_created": 0}
+
+    for fid, post in all_facts():
+        changed = False
+        episodes = post.get("episodes")
+        if not isinstance(episodes, list) or not episodes:
+            eid, created = migrate_episode("fact", fid, post.content, post, dry_run=dry_run)
+            episodes = [eid]
+            changed = True
+            counts["episodes_created"] += int(created)
+        if not post.get("recorded_at"):
+            post["recorded_at"] = utc_now_iso()
+            changed = True
+        if not post.get("epistemic_status"):
+            # Human-confirmed legacy facts begin supported; invalidated facts
+            # remain excluded independently by their existing invalidation flag.
+            post["epistemic_status"] = "supported"
+            changed = True
+        if changed:
+            post["episodes"] = episodes
+            counts["facts_changed"] += 1
+            if not dry_run:
+                save_fact(fid, post)
+                append_event("assertion.migrated", fid, assertion_kind="fact", episodes=episodes)
+
+    if include_pending:
+        for pid, data in all_pending():
+            changed = False
+            episodes = data.get("episodes")
+            if not isinstance(episodes, list) or not episodes:
+                eid, created = migrate_episode(
+                    "pending", pid, str(data.get("text") or ""), data, dry_run=dry_run,
+                )
+                episodes = [eid]
+                changed = True
+                counts["episodes_created"] += int(created)
+            if not data.get("recorded_at"):
+                data["recorded_at"] = str(data.get("proposed_at") or utc_now_iso())
+                changed = True
+            if changed:
+                data["episodes"] = episodes
+                counts["pending_changed"] += 1
+                if not dry_run:
+                    write_yaml(pending_dir(create=True) / f"{pid}.yml", data)
+                    append_event("assertion.migrated", pid, assertion_kind="pending", episodes=episodes)
+    return counts
+
+
 def tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
@@ -1668,6 +1770,37 @@ def cmd_episodes(
             f"      {preview}"
         )
     console.print(f"[dim]{len(rows)} untrusted episode(s)[/dim]")
+
+
+@app.command("migrate")
+def cmd_migrate(
+    pending: bool = typer.Option(True, "--pending/--no-pending", help="Also migrate current candidate assertions."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report changes without writing them."),
+    rebuild: bool = typer.Option(True, "--rebuild-graph/--no-rebuild-graph", help="Rebuild the external graph after migration."),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Backfill legacy assertions into the temporal evidence model.
+
+    This is deliberately structural: it creates source episodes, recorded time,
+    and epistemic defaults, but never guesses typed subject/predicate/object
+    relationships from prose. It is safe to run repeatedly.
+    """
+    counts = migrate_legacy_store(include_pending=pending, dry_run=dry_run)
+    graph_counts: dict[str, int] = {}
+    if rebuild and not dry_run:
+        graph_counts = rebuild_graph()
+    result = {**counts, "dry_run": dry_run, "graph": graph_counts}
+    if as_json:
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+        return
+    mode = "Would migrate" if dry_run else "Migrated"
+    console.print(
+        f"[green]{mode}[/green] facts={counts['facts_changed']} "
+        f"pending={counts['pending_changed']} episodes={counts['episodes_created']}"
+    )
+    if graph_counts:
+        console.print("[dim]Graph rebuilt: " + "  ".join(
+            f"{key}={value}" for key, value in graph_counts.items()) + "[/dim]")
 
 
 @app.command("graph-rebuild")

@@ -915,6 +915,33 @@ class TestEpisodeIngestion:
         assert "UNTRUSTED EPISODE" in res.stdout
         assert "Raw source" in res.stdout
 
+    def test_migrate_backfills_legacy_assertions_idempotently(self, store):
+        from typer.testing import CliRunner
+        add_fact(store, "legacy", "A legacy confirmed assertion.", learned_at="2025-01-01",
+                 evidence="old-doc.md:10")
+        add_candidate(store, "legacy-candidate", "A legacy candidate.",
+                      evidence="old-doc.md:20", proposed_at="2025-02-01")
+        runner = CliRunner()
+        first = runner.invoke(k.app, ["migrate", "--no-rebuild-graph", "--json"])
+        assert first.exit_code == 0, first.output
+        assert json.loads(first.stdout) == {
+            "facts_changed": 1, "pending_changed": 1, "episodes_created": 2,
+            "dry_run": False, "graph": {},
+        }
+        post = frontmatter.load(store / "legacy.md")
+        candidate = yaml.safe_load((store / "pending" / "legacy-candidate.yml").read_text())
+        assert post["epistemic_status"] == "supported"
+        assert post["recorded_at"]
+        assert candidate["recorded_at"] == "2025-02-01"
+        assert len(post["episodes"]) == len(candidate["episodes"]) == 1
+        assert len(k.all_episodes()) == 2
+
+        second = runner.invoke(k.app, ["migrate", "--no-rebuild-graph", "--json"])
+        assert second.exit_code == 0, second.output
+        assert json.loads(second.stdout)["facts_changed"] == 0
+        assert json.loads(second.stdout)["pending_changed"] == 0
+        assert json.loads(second.stdout)["episodes_created"] == 0
+
 
 class TestTypedAssertionsAndGraph:
     def test_confirm_preserves_typed_temporal_and_repo_fields(self, store):

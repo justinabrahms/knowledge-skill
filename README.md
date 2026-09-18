@@ -12,6 +12,7 @@ hold for yours. `knowledge tune` derives your own.*
 
     knowledge init                       # writes .knowledge.yml + the store + the agent protocol
     knowledge ingest "raw observation"   # unlimited, untrusted evidence capture
+    knowledge migrate --dry-run           # inspect legacy-store migration
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
     knowledge sweep                      # validate/refute deterministic assertions
     knowledge graph-neighbors repo:acme/widgets
@@ -134,6 +135,12 @@ structured assertion marks it `unknown` — never refuted. The first built-ins a
 validation history into SQLite. `graph-neighbors` traverses typed assertions up
 to three hops. The projection is disposable; Markdown/YAML plus append-only logs
 remain the source of truth.
+
+For an existing two-layer store, run `knowledge migrate` once. It is idempotent:
+it links every legacy fact and current candidate to a clearly labelled untrusted
+episode, adds `recorded_at` and safe epistemic defaults, and rebuilds the graph.
+It deliberately does not infer `subject` / `predicate` / `object` from prose;
+typed edges must be supported by direct evidence.
 
 ## Retrieval
 
@@ -311,7 +318,7 @@ run with `uv`. `qmd` is optional — if present it adds a semantic check to
 
     ./run-tests.sh
 
-91 tests, weighted toward the failures that actually occurred while this was
+92 tests, weighted toward the failures that actually occurred while this was
 built rather than toward line coverage:
 
 - a tokenizer that kept `per-cluster` whole and so never matched a paraphrase
