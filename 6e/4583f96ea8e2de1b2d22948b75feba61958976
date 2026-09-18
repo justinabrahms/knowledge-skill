@@ -1,0 +1,33 @@
+docs/openspec/specs/.gitkeep
+  s_7b538ba8b3b9a3::t_e891dc658ac93e 1
+AGENTS.md
+  s_7b538ba8b3b9a3::t_e891dc658ac93e 1-14
+  s_7b538ba8b3b9a3::t_a2e2b56ecbcc18 15-16
+docs/adrs/.gitkeep
+  s_7b538ba8b3b9a3::t_e891dc658ac93e 1
+docs/openspec/specs/temporal-knowledge-graph/design.md
+  s_7b538ba8b3b9a3::t_58267a5ebde22f 9,55-56,89
+  s_7b538ba8b3b9a3::t_ac40cdba077a3e 10-11
+  s_7b538ba8b3b9a3::t_a2e2b56ecbcc18 1-8,12-54,57-88,90-166
+docs/openspec/specs/temporal-knowledge-graph/spec.md
+  s_7b538ba8b3b9a3::t_e03c4f20b06d10 39,55,70,85,100,116,130,132-137,146-160,162-173,176
+  s_7b538ba8b3b9a3::t_a2e2b56ecbcc18 1-38,40-54,56-69,71-84,86-99,101-115,117-129,131,138-145,161,174-175,177-202
+.gitignore
+  s_7b538ba8b3b9a3::t_e891dc658ac93e 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6e4583f96ea8e2de1b2d22948b75feba61958976",
+  "prompts": {},
+  "sessions": {
+    "s_7b538ba8b3b9a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b5e9-8dea-74e2-81b5-64c50f7e42f0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
