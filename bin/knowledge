@@ -1405,10 +1405,11 @@ def rebuild_graph() -> dict[str, int]:
     """Rebuild the external SQLite projection from files and append-only logs."""
     path = graph_index_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp.sqlite3")
-    if tmp.exists():
-        tmp.unlink()
+    # A unique sibling lets a failed rebuild leave the last complete projection
+    # readable, and avoids one process deleting another process's in-progress DB.
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     conn = sqlite3.connect(tmp)
+    completed = False
     try:
         conn.executescript("""
         PRAGMA journal_mode = OFF;
@@ -1515,8 +1516,11 @@ def rebuild_graph() -> dict[str, int]:
         conn.execute("INSERT INTO metadata VALUES (?,?)", ("fingerprint", graph_fingerprint()))
         conn.execute("INSERT INTO metadata VALUES (?,?)", ("built_at", utc_now_iso()))
         conn.commit()
+        completed = True
     finally:
         conn.close()
+        if not completed and tmp.exists():
+            tmp.unlink()
     os.replace(tmp, path)
     return counts
 

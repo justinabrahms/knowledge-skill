@@ -1001,6 +1001,28 @@ class TestTypedAssertionsAndGraph:
             "service:checkout", "owned_by", "team:widgets")
         conn.close()
 
+    def test_corrupt_projection_is_rebuilt_without_losing_assertions(self, store):
+        write_config(store, graph_cache=str(store.parent / "cache"))
+        add_fact(store, "owner", "Widgets owns checkout.", subject="service:checkout",
+                 predicate="owned_by", object="team:widgets")
+        graph = k.graph_index_path()
+        graph.parent.mkdir(parents=True, exist_ok=True)
+        graph.write_text("not a sqlite database")
+        rebuilt = k.ensure_graph()
+        conn = k.sqlite3.connect(rebuilt)
+        assert conn.execute("SELECT id FROM assertions").fetchone()[0] == "owner"
+        conn.close()
+
+    def test_graph_projection_binds_assertion_text_as_data(self, store):
+        write_config(store, graph_cache=str(store.parent / "cache"))
+        add_fact(store, "quote", "'); DROP TABLE assertions; --", subject="service:checkout",
+                 predicate="owned_by", object="team:widgets")
+        k.rebuild_graph()
+        conn = k.sqlite3.connect(k.graph_index_path())
+        assert conn.execute("SELECT text FROM assertions WHERE id='quote'").fetchone()[0] == "'); DROP TABLE assertions; --"
+        assert conn.execute("SELECT count(*) FROM assertions").fetchone()[0] == 1
+        conn.close()
+
     def test_neighbors_excludes_pending_unless_requested(self, store):
         from typer.testing import CliRunner
         write_config(store, graph_cache=str(store.parent / "cache"))
