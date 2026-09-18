@@ -1167,3 +1167,30 @@ class TestSweeper:
         assert res.exit_code == 0, repr(res.exception)
         assert json.loads(res.stdout)[0]["outcome"] == "unknown"
         assert frontmatter.load(store / "missing.md")["epistemic_status"] == "unknown"
+
+    def test_sweep_validates_explicit_codeowners_relation(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        repo = self._git_repo(tmp_path)
+        (repo / "CODEOWNERS").write_text("/services/** @acme/platform\n")
+        subprocess.run(["git", "add", "CODEOWNERS"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "add owners"], cwd=repo, check=True)
+        monkeypatch.chdir(repo)
+        add_fact(
+            store, "service-owner", "The service path is owned by the platform team.",
+            repo="acme/widgets", subject="repo-path:acme/widgets:/services/**",
+            predicate="owned_by", object="github-team:acme/platform", repo_path="CODEOWNERS",
+            validator={"type": "git-codeowners-owner", "path": "CODEOWNERS"},
+            epistemic_status="unknown",
+        )
+        runner = CliRunner()
+        supported = runner.invoke(k.app, ["sweep", "service-owner", "--json"])
+        assert supported.exit_code == 0, repr(supported.exception)
+        assert json.loads(supported.stdout)[0]["outcome"] == "supported"
+
+        (repo / "CODEOWNERS").write_text("/services/** @acme/other\n")
+        subprocess.run(["git", "add", "CODEOWNERS"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "change owners"], cwd=repo, check=True)
+        contradicted = runner.invoke(k.app, ["sweep", "service-owner", "--json"])
+        assert contradicted.exit_code == 0, repr(contradicted.exception)
+        assert json.loads(contradicted.stdout)[0]["outcome"] == "contradicted"

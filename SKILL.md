@@ -92,8 +92,9 @@ Treat metadata as load-bearing:
 ## Validation and refutation
 
 Typed assertions can carry deterministic validator specifications. Current
-built-ins are `git-path` for `contains_path`/`has_path` relations and
-`git-file-contains` for literal source evidence.
+built-ins are `git-path` for `contains_path`/`has_path` relations,
+`git-file-contains` for literal source evidence, and `git-codeowners-owner`
+for typed `repo-path:* —owned_by→ github-team:*` declarations.
 
 ```bash
 knowledge propose "The repo contains deploy.yaml." --topic deploy \

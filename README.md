@@ -130,7 +130,10 @@ commit intervals are checked against the current checkout when available.
 `.validations.jsonl`. Agreement marks an assertion `supported`, authoritative
 contradiction marks it `refuted`, and an unavailable checkout or insufficiently
 structured assertion marks it `unknown` — never refuted. The first built-ins are
-`git-path` and `git-file-contains`.
+`git-path`, `git-file-contains`, and `git-codeowners-owner`. The ownership
+validator reads a CODEOWNERS file and checks the assertion's typed
+`repo-path:*` subject and owner entity directly; missing access remains
+`unknown`, while an absent declared row is a contradiction.
 
 `knowledge graph-rebuild` projects assertions, entities, episodes, and
 validation history into SQLite. `graph-neighbors` traverses typed assertions up

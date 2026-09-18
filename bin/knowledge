@@ -1286,8 +1286,10 @@ def validate_epistemic_status(status: str) -> None:
 def validator_spec(kind: str, path: str = "", expected: str = "") -> Optional[dict]:
     if not kind:
         return None
-    if kind not in {"git-path", "git-file-contains"}:
-        raise typer.BadParameter("--validator must be git-path or git-file-contains")
+    if kind not in {"git-path", "git-file-contains", "git-codeowners-owner"}:
+        raise typer.BadParameter(
+            "--validator must be git-path, git-file-contains, or git-codeowners-owner"
+        )
     if not path:
         raise typer.BadParameter(f"--repo-path is required for --validator {kind}")
     if kind == "git-file-contains" and not expected:
@@ -1578,6 +1580,21 @@ def run_validator(post: frontmatter.Post) -> tuple[str, str, str]:
         if expected in show.stdout:
             return "supported", evidence, "expected literal is present"
         return "contradicted", evidence, "expected literal is absent"
+    if kind == "git-codeowners-owner":
+        if show.returncode != 0:
+            return "contradicted", evidence, "CODEOWNERS evidence path does not exist at HEAD"
+        if str(post.get("predicate") or "") != "owned_by":
+            return "unknown", evidence, "git-codeowners-owner only validates owned_by assertions"
+        subject = str(post.get("subject") or "")
+        object_value = str(post.get("object") or "")
+        for relation in codeowners_relations(show.stdout, repo):
+            if relation["subject"] == subject and relation["object"] == object_value:
+                return (
+                    "supported",
+                    f"{evidence}:{relation['line']}",
+                    "CODEOWNERS ownership declaration is present",
+                )
+        return "contradicted", evidence, "CODEOWNERS ownership declaration is absent"
     return "unknown", evidence, f"unsupported validator: {kind}"
 
 
@@ -1675,7 +1692,7 @@ def cmd_add(
     repo: Optional[str] = typer.Option(None, "--repo", help="Repository this assertion is about."),
     repo_revision: str = typer.Option("", "--repo-revision", help="Evidence commit SHA."),
     repo_path: str = typer.Option("", "--repo-path", help="Evidence path within the repository."),
-    validator: str = typer.Option("", "--validator", help="git-path | git-file-contains"),
+    validator: str = typer.Option("", "--validator", help="git-path | git-file-contains | git-codeowners-owner"),
     expected: str = typer.Option("", "--expected", help="Literal required by git-file-contains."),
     fact_id: Optional[str] = typer.Option(None, "--id", help="Override auto-slugged ID."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip duplicate-check prompt."),
@@ -2082,7 +2099,7 @@ def cmd_propose(
     valid_to_commit: str = typer.Option("", "--valid-to-commit", help="First no-longer-applicable commit."),
     repo_revision: str = typer.Option("", "--repo-revision", help="Evidence commit; defaults to cwd HEAD."),
     repo_path: str = typer.Option("", "--repo-path", help="Evidence path within the repository."),
-    validator: str = typer.Option("", "--validator", help="git-path | git-file-contains"),
+    validator: str = typer.Option("", "--validator", help="git-path | git-file-contains | git-codeowners-owner"),
     expected: str = typer.Option("", "--expected", help="Literal required by git-file-contains."),
     episodes: Optional[list[str]] = typer.Option(None, "--episode", help="Source episode id; repeatable."),
     fact_id: Optional[str] = typer.Option(None, "--id", help="Override auto-slugged ID."),
