@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.sdd/
 
 # Generated review decks and apply logs contain the store's actual facts.
 # The pre-publish gate also fails on these; the ignore is the first line of
