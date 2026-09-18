@@ -1,0 +1,32 @@
+scripts/run-sweep.sh
+  s_7b538ba8b3b9a3::t_127d1f5c0baea9 1-8
+tests/test_knowledge.py
+  s_7b538ba8b3b9a3::t_84983474978a51 1098-1117
+  s_7b538ba8b3b9a3::t_0986b6b1c57b2d 1053-1066
+  s_7b538ba8b3b9a3::t_127d1f5c0baea9 1271-1281
+docs/openspec/specs/temporal-knowledge-graph/tasks.md
+  s_7b538ba8b3b9a3::t_0986b6b1c57b2d 12,24,27,36,39
+tests/fixtures/retrieval-corpus.json
+  s_7b538ba8b3b9a3::t_0986b6b1c57b2d 1-5
+bin/knowledge
+  s_7b538ba8b3b9a3::t_d409f995951b9e 1880
+  s_7b538ba8b3b9a3::t_25fb7b3dabd2b0 67,1889-1914,1918-1919,1930,1945,1949,1956,1961-1962,1967-1968,1973,1976
+  s_7b538ba8b3b9a3::t_86d4112c4bc254 1290,1292,1626-1634
+  s_7b538ba8b3b9a3::t_127d1f5c0baea9 2108,2150-2154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e657a1d0e91adeaea5ab943ad2041c0c75b8f160",
+  "prompts": {},
+  "sessions": {
+    "s_7b538ba8b3b9a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b5e9-8dea-74e2-81b5-64c50f7e42f0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
