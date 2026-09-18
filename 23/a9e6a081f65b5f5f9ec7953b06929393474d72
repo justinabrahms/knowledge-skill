@@ -1,0 +1,25 @@
+README.md
+  s_7b538ba8b3b9a3::t_3329353e690de9 321
+bin/knowledge
+  s_7b538ba8b3b9a3::t_80d772c0731226 642-644,667-671
+  s_7b538ba8b3b9a3::t_1ceb31330200ae 1816-1817
+  s_7b538ba8b3b9a3::t_51ff56733e15f6 584,594-606,608-618,620,624,626,632,637
+tests/test_knowledge.py
+  s_7b538ba8b3b9a3::t_a3835ac2282ee2 928,935-936,947-955
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "23a9e6a081f65b5f5f9ec7953b06929393474d72",
+  "prompts": {},
+  "sessions": {
+    "s_7b538ba8b3b9a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b5e9-8dea-74e2-81b5-64c50f7e42f0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
