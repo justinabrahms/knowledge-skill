@@ -36,6 +36,13 @@ knowledge ingest "<observation or quote>" \
   [--repo owner/name] [--revision <sha>] [--path <repo-relative-path>]
 ```
 
+For explicit ownership evidence, extract reviewable typed candidates from an
+existing CODEOWNERS episode. This never confirms a relation:
+
+```bash
+knowledge extract <episode-id> --extractor codeowners
+```
+
 Do not ingest secrets, credentials, one-off task status, or narrative reasoning.
 Long-form investigation belongs in session notes.
 

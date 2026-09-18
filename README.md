@@ -12,6 +12,7 @@ hold for yours. `knowledge tune` derives your own.*
 
     knowledge init                       # writes .knowledge.yml + the store + the agent protocol
     knowledge ingest "raw observation"   # unlimited, untrusted evidence capture
+    knowledge extract <episode>           # explicit source → pending typed candidates
     knowledge migrate --dry-run           # inspect legacy-store migration
     knowledge propose "..." --topic t --provenance inferred --evidence "src/x.py:12"
     knowledge sweep                      # validate/refute deterministic assertions
@@ -141,6 +142,16 @@ it links every legacy fact and current candidate to a clearly labelled untrusted
 episode, adds `recorded_at` and safe epistemic defaults, and rebuilds the graph.
 It deliberately does not infer `subject` / `predicate` / `object` from prose;
 typed edges must be supported by direct evidence.
+
+### Typed candidate extraction
+
+`knowledge extract <episode> --extractor codeowners` parses only explicit
+CODEOWNERS rows from an existing episode. Each owner declaration becomes a
+low-confidence pending relation linked to the episode and exact source line;
+it never becomes trusted memory until review. The extractor requires the
+episode to carry the repository it describes. It rejects ordinary prose and
+only handles explicit ownership declarations. Re-running it is safe: existing or near-duplicate
+candidates are reported without another write.
 
 ## Retrieval
 

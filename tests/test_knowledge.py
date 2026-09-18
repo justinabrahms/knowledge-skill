@@ -1058,6 +1058,63 @@ class TestRepoAndDateAwareRetrieval:
         assert json.loads(res.stdout)["hits"] == []
 
 
+class TestTypedCandidateExtraction:
+    def test_extract_codeowners_creates_evidence_linked_pending_edges(self, store):
+        from typer.testing import CliRunner
+
+        eid, _ = k.write_episode(
+            "# owners\n/services/payments/** @acme/payments\n/docs/** docs@example.com @writer\n"
+            "Payments is owned by @acme/payments.",
+            kind="text", source="CODEOWNERS", repo="acme/widgets", path="CODEOWNERS",
+        )
+        runner = CliRunner()
+        res = runner.invoke(k.app, ["extract", eid, "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        rows = json.loads(res.stdout)["candidates"]
+        assert len(rows) == 3
+        assert {row["status"] for row in rows} == {"queued"}
+
+        pending = dict(k.all_pending())
+        team = next(item for item in pending.values()
+                    if item["object"] == "github-team:acme/payments")
+        assert team["subject"] == "repo-path:acme/widgets:/services/payments/**"
+        assert team["predicate"] == "owned_by"
+        assert team["episodes"] == [eid]
+        assert "line 2: /services/payments/** @acme/payments" in team["evidence"]
+        assert team["provenance"] == "inferred"
+        assert team["confidence"] == "low"
+        assert k.all_facts() == []
+
+        graph = runner.invoke(
+            k.app,
+            ["graph-neighbors", team["subject"], "--pending", "--json"],
+        )
+        assert graph.exit_code == 0, repr(graph.exception)
+        assert json.loads(graph.stdout)[0]["object"] == "github-team:acme/payments"
+
+    def test_extract_is_idempotent_and_rejects_prose(self, store):
+        from typer.testing import CliRunner
+
+        eid, _ = k.write_episode(
+            "/services/** @acme/platform\nPlatform owns the services directory.",
+            source="CODEOWNERS", repo="acme/widgets", path="CODEOWNERS",
+        )
+        runner = CliRunner()
+        first = runner.invoke(k.app, ["extract", eid, "--json"])
+        second = runner.invoke(k.app, ["extract", eid, "--json"])
+        assert first.exit_code == second.exit_code == 0
+        assert len(json.loads(first.stdout)["candidates"]) == 1
+        assert json.loads(second.stdout)["candidates"][0]["status"] == "already_pending"
+        assert len(k.all_pending()) == 1
+
+    def test_extract_requires_a_repo_on_the_episode(self, store):
+        from typer.testing import CliRunner
+
+        eid, _ = k.write_episode("/services/** @acme/platform", source="CODEOWNERS")
+        res = CliRunner().invoke(k.app, ["extract", eid, "--json"])
+        assert res.exit_code != 0
+
+
 class TestSweeper:
     def _git_repo(self, tmp_path: Path) -> Path:
         repo = tmp_path / "checkout"

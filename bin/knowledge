@@ -488,6 +488,14 @@ def all_episodes() -> list[tuple[str, dict]]:
     return out
 
 
+def load_episode(episode_id: str) -> dict:
+    """Load one untrusted source episode or report an actionable error."""
+    for eid, data in all_episodes():
+        if eid == episode_id:
+            return data
+    raise typer.BadParameter(f"unknown episode id: {episode_id}")
+
+
 def append_jsonl(name: str, record: dict) -> None:
     """Append audit data without allowing telemetry failure to lose the write."""
     try:
@@ -1787,6 +1795,112 @@ def cmd_episodes(
             f"      {preview}"
         )
     console.print(f"[dim]{len(rows)} untrusted episode(s)[/dim]")
+
+
+# Governing: SPEC-0001 REQ "R4 Evidence-backed typed relations"
+def codeowners_relations(text: str, repo: str) -> list[dict]:
+    """Extract only explicit CODEOWNERS ownership declarations."""
+    relations: list[dict] = []
+    for line_number, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        pattern = fields[0]
+        if not (pattern.startswith(("/", "*", ".")) or "/" in pattern):
+            continue
+        for raw_owner in fields[1:]:
+            if raw_owner.startswith("@") and "/" in raw_owner[1:]:
+                owner = f"github-team:{raw_owner[1:].lower()}"
+            elif raw_owner.startswith("@"):
+                owner = f"github-user:{raw_owner[1:].lower()}"
+            elif "@" in raw_owner and not raw_owner.startswith("@"):
+                owner = f"email:{raw_owner.lower()}"
+            else:
+                continue
+            relations.append({
+                "line": line_number,
+                "raw": raw.strip(),
+                "subject": f"repo-path:{repo}:{pattern}",
+                "predicate": "owned_by",
+                "object": owner,
+                "text": f"Path {pattern} in {repo} is owned by {raw_owner}.",
+            })
+    return relations
+
+
+def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict) -> tuple[str, str]:
+    """Write an evidence-linked, untrusted candidate without changing trust."""
+    text = str(relation["text"])
+    identity = "|".join(str(relation[key]) for key in ("subject", "predicate", "object"))
+    pid = f"ownership-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+    if (pending_dir() / f"{pid}.yml").exists():
+        return pid, "already_pending"
+    duplicate = find_near_duplicate(text)
+    if duplicate:
+        return pid, f"near_duplicate:{duplicate[0]}:{duplicate[1]}"
+
+    repo = str(episode.get("repo") or "")
+    record = {
+        "id": pid,
+        "text": text,
+        "topic": "ownership",
+        "scope": default_scope(),
+        "confidence": "low",
+        "provenance": "inferred",
+        "evidence": f"episode {episode_id} line {relation['line']}: {relation['raw']}",
+        "source": str(episode.get("source") or f"episode:{episode_id}"),
+        "proposed_at": today_iso(),
+        "repo": repo,
+        "cwd": str(episode.get("cwd") or ""),
+        "episodes": [episode_id],
+        "subject": relation["subject"],
+        "predicate": relation["predicate"],
+        "object": relation["object"],
+        "repo_revision": str(episode.get("revision") or ""),
+        "repo_path": str(episode.get("path") or "CODEOWNERS"),
+        "extraction": {"kind": "codeowners", "version": 1, "line": relation["line"]},
+    }
+    write_yaml(pending_dir(create=True) / f"{pid}.yml", record)
+    append_event("assertion.extracted", pid, episode=episode_id, repo=repo,
+                 extractor="codeowners", line=relation["line"])
+    return pid, "queued"
+
+
+@app.command("extract")
+def cmd_extract(
+    episode_id: str = typer.Argument(..., help="Untrusted source episode to parse."),
+    extractor: str = typer.Option("codeowners", "--extractor", help="Only codeowners is currently supported."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show candidates without writing them."),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Derive reviewable typed candidates from explicit source evidence only."""
+    if extractor != "codeowners":
+        raise typer.BadParameter("--extractor must be codeowners")
+    episode = load_episode(episode_id)
+    repo = str(episode.get("repo") or "")
+    if not repo:
+        raise typer.BadParameter("the episode needs --repo; CODEOWNERS rows have no repository identity alone")
+    relations = codeowners_relations(str(episode.get("text") or ""), repo)
+    rows = []
+    for relation in relations:
+        if dry_run:
+            identity = "|".join(str(relation[key]) for key in ("subject", "predicate", "object"))
+            pid = f"ownership-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+            status = "would_queue"
+        else:
+            pid, status = queue_extracted_candidate(episode_id, episode, relation)
+        rows.append({"id": pid, "status": status, **relation})
+    result = {"episode": episode_id, "extractor": extractor, "candidates": rows}
+    if as_json:
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+        return
+    for row in rows:
+        console.print(f"[{row['status']}] {row['id']}: {row['subject']} "
+                      f"—{row['predicate']}→ {row['object']}")
+    console.print(f"[dim]{len(rows)} explicit ownership relation(s) found[/dim]")
 
 
 @app.command("migrate")
