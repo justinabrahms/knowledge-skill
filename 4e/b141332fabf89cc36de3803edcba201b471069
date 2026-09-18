@@ -1,0 +1,32 @@
+bin/knowledge
+  s_7b538ba8b3b9a3::t_37531c9624db1f 568-669
+  s_7b538ba8b3b9a3::t_74e5963147e545 1775-1805
+hooks/knowledge-recall.sh
+  s_7b538ba8b3b9a3::t_4991843c51331a 1-29
+SKILL.md
+  s_7b538ba8b3b9a3::t_21010303735f07 119-122
+hooks/knowledge-capture-cleanup.sh
+  s_7b538ba8b3b9a3::t_4991843c51331a 1-9
+hooks/knowledge-inject-topics.sh
+  s_7b538ba8b3b9a3::t_4991843c51331a 1-39
+tests/test_knowledge.py
+  s_7b538ba8b3b9a3::t_00f717e8ede424 918-944
+README.md
+  s_7b538ba8b3b9a3::t_21010303735f07 15,139-144,321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4eb141332fabf89cc36de3803edcba201b471069",
+  "prompts": {},
+  "sessions": {
+    "s_7b538ba8b3b9a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b5e9-8dea-74e2-81b5-64c50f7e42f0",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
