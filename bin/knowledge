@@ -64,6 +64,7 @@ USAGE_LOG_NAME = ".usage.jsonl"
 # files remain the human-readable view; these logs retain how that view changed.
 EVENT_LOG_NAME = ".events.jsonl"
 VALIDATION_LOG_NAME = ".validations.jsonl"
+SWEEP_LOG_NAME = ".sweeps.jsonl"
 
 CONFIG_FILENAME = ".knowledge.yml"
 USER_CONFIG = Path.home() / ".config/knowledge/config.yml"
@@ -1286,9 +1287,9 @@ def validate_epistemic_status(status: str) -> None:
 def validator_spec(kind: str, path: str = "", expected: str = "") -> Optional[dict]:
     if not kind:
         return None
-    if kind not in {"git-path", "git-file-contains", "git-codeowners-owner"}:
+    if kind not in {"git-path", "git-file-contains", "git-codeowners-owner", "git-dependency-map"}:
         raise typer.BadParameter(
-            "--validator must be git-path, git-file-contains, or git-codeowners-owner"
+            "--validator must be git-path, git-file-contains, git-codeowners-owner, or git-dependency-map"
         )
     if not path:
         raise typer.BadParameter(f"--repo-path is required for --validator {kind}")
@@ -1622,6 +1623,15 @@ def run_validator(post: frontmatter.Post) -> tuple[str, str, str]:
                     "CODEOWNERS ownership declaration is present",
                 )
         return "contradicted", evidence, "CODEOWNERS ownership declaration is absent"
+    if kind == "git-dependency-map":
+        if show.returncode != 0:
+            return "contradicted", evidence, "dependency-map evidence path does not exist at HEAD"
+        if str(post.get("predicate") or "") != "depends_on":
+            return "unknown", evidence, "git-dependency-map only validates depends_on assertions"
+        for relation in dependency_map_relations(show.stdout, repo):
+            if relation["subject"] == str(post.get("subject")) and relation["object"] == str(post.get("object")):
+                return "supported", f"{evidence}:{relation['line']}", "dependency declaration is present"
+        return "contradicted", evidence, "dependency declaration is absent"
     return "unknown", evidence, f"unsupported validator: {kind}"
 
 
@@ -1867,6 +1877,7 @@ def codeowners_relations(text: str, repo: str) -> list[dict]:
             relations.append({
                 "line": line_number,
                 "raw": raw.strip(),
+                "topic": "ownership",
                 "subject": f"repo-path:{repo}:{pattern}",
                 "predicate": "owned_by",
                 "object": owner,
@@ -1875,11 +1886,37 @@ def codeowners_relations(text: str, repo: str) -> list[dict]:
     return relations
 
 
-def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict) -> tuple[str, str]:
+def dependency_map_relations(text: str, repo: str) -> list[dict]:
+    """Extract a deliberately small YAML dependency-map format with line evidence."""
+    relations: list[dict] = []
+    in_dependencies = False
+    for line_number, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if line == "dependencies:":
+            in_dependencies = True
+            continue
+        if line and not raw.startswith((" ", "\t", "-")):
+            in_dependencies = False
+        if not in_dependencies:
+            continue
+        match = re.fullmatch(r"-\s*([a-z0-9_.-]+/[a-z0-9_.-]+)", line, re.I)
+        if not match:
+            continue
+        target = match.group(1).lower()
+        relations.append({
+            "line": line_number, "raw": raw.strip(), "topic": "dependencies",
+            "subject": f"repo:{repo}", "predicate": "depends_on", "object": f"repo:{target}",
+            "text": f"Repository {repo} depends on {target}.",
+        })
+    return relations
+
+
+def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict, extractor: str) -> tuple[str, str]:
     """Write an evidence-linked, untrusted candidate without changing trust."""
     text = str(relation["text"])
     identity = "|".join(str(relation[key]) for key in ("subject", "predicate", "object"))
-    pid = f"ownership-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+    topic = str(relation["topic"])
+    pid = f"{topic}-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
     if (pending_dir() / f"{pid}.yml").exists():
         return pid, "already_pending"
     duplicate = find_near_duplicate(text)
@@ -1890,7 +1927,7 @@ def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict) ->
     record = {
         "id": pid,
         "text": text,
-        "topic": "ownership",
+        "topic": topic,
         "scope": default_scope(),
         "confidence": "low",
         "provenance": "inferred",
@@ -1905,37 +1942,38 @@ def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict) ->
         "object": relation["object"],
         "repo_revision": str(episode.get("revision") or ""),
         "repo_path": str(episode.get("path") or "CODEOWNERS"),
-        "extraction": {"kind": "codeowners", "version": 1, "line": relation["line"]},
+        "extraction": {"kind": extractor, "version": 1, "line": relation["line"]},
     }
     write_yaml(pending_dir(create=True) / f"{pid}.yml", record)
     append_event("assertion.extracted", pid, episode=episode_id, repo=repo,
-                 extractor="codeowners", line=relation["line"])
+                 extractor=extractor, line=relation["line"])
     return pid, "queued"
 
 
 @app.command("extract")
 def cmd_extract(
     episode_id: str = typer.Argument(..., help="Untrusted source episode to parse."),
-    extractor: str = typer.Option("codeowners", "--extractor", help="Only codeowners is currently supported."),
+    extractor: str = typer.Option("codeowners", "--extractor", help="codeowners | dependency-map"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show candidates without writing them."),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Derive reviewable typed candidates from explicit source evidence only."""
-    if extractor != "codeowners":
-        raise typer.BadParameter("--extractor must be codeowners")
+    if extractor not in {"codeowners", "dependency-map"}:
+        raise typer.BadParameter("--extractor must be codeowners or dependency-map")
     episode = load_episode(episode_id)
     repo = str(episode.get("repo") or "")
     if not repo:
         raise typer.BadParameter("the episode needs --repo; CODEOWNERS rows have no repository identity alone")
-    relations = codeowners_relations(str(episode.get("text") or ""), repo)
+    parser = codeowners_relations if extractor == "codeowners" else dependency_map_relations
+    relations = parser(str(episode.get("text") or ""), repo)
     rows = []
     for relation in relations:
         if dry_run:
             identity = "|".join(str(relation[key]) for key in ("subject", "predicate", "object"))
-            pid = f"ownership-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+            pid = f"{relation['topic']}-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
             status = "would_queue"
         else:
-            pid, status = queue_extracted_candidate(episode_id, episode, relation)
+            pid, status = queue_extracted_candidate(episode_id, episode, relation, extractor)
         rows.append({"id": pid, "status": status, **relation})
     result = {"episode": episode_id, "extractor": extractor, "candidates": rows}
     if as_json:
@@ -2067,6 +2105,7 @@ def cmd_sweep(
     limit: int = typer.Option(100, "--limit", "-n"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     explain: bool = typer.Option(False, "--explain", help="Preview deterministic selection order without validating."),
+    run_id: str = typer.Option("", "--run-id", help="External scheduler correlation id."),
     as_json: bool = typer.Option(False, "--json"),
 ):
     """Revalidate deterministic assertions and retain support/refutation history."""
@@ -2108,6 +2147,11 @@ def cmd_sweep(
         outcome, evidence, detail = run_validator(post)
         record_validation(fid, post, outcome, evidence, detail, mutate=not dry_run)
         results.append({"id": fid, "outcome": outcome, "evidence": evidence, "detail": detail})
+    if not dry_run:
+        append_jsonl(SWEEP_LOG_NAME, {
+            "at": utc_now_iso(), "run_id": run_id, "limit": limit,
+            "selected": [fid for fid, _, _, _ in selected], "results": results,
+        })
     if as_json:
         sys.stdout.write(json.dumps(results, indent=2) + "\n")
         return

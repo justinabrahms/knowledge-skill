@@ -1050,6 +1050,20 @@ class TestTypedAssertionsAndGraph:
 
 
 class TestRepoAndDateAwareRetrieval:
+    def test_retrieval_fixture_corpus_preserves_repo_and_time_isolation(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+        corpus = json.loads((Path(__file__).parent / "fixtures/retrieval-corpus.json").read_text())
+        for row in corpus:
+            add_fact(store, row.pop("id"), row.pop("text"), **row)
+        repo = tmp_path / "widgets"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widgets.git"], cwd=repo, check=True)
+        monkeypatch.chdir(repo)
+        now = json.loads(CliRunner().invoke(k.app, ["search", "owns checkout", "--as-of", "2026-06-01", "--json"]).stdout)
+        old = json.loads(CliRunner().invoke(k.app, ["search", "owns checkout", "--as-of", "2025-06-01", "--json"]).stdout)
+        assert {row["id"] for row in now} == {"widgets"}
+        assert {row["id"] for row in old} == {"old"}
     def test_search_defaults_to_current_repo_and_keeps_global_facts(self, store, monkeypatch):
         from typer.testing import CliRunner
         add_fact(store, "here", "Checkout uses GitOps.", repo="acme/checkout")
@@ -1081,6 +1095,26 @@ class TestRepoAndDateAwareRetrieval:
 
 
 class TestTypedCandidateExtraction:
+    def test_extract_dependency_map_and_validate_it(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        repo = TestSweeper()._git_repo(tmp_path)
+        (repo / "dependencies.yaml").write_text("dependencies:\n  - acme/auth\n")
+        subprocess.run(["git", "add", "dependencies.yaml"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "dependencies"], cwd=repo, check=True)
+        monkeypatch.chdir(repo)
+        eid, _ = k.write_episode("dependencies:\n  - acme/auth\n", source="dependencies.yaml",
+                                 repo="acme/widgets", path="dependencies.yaml")
+        runner = CliRunner()
+        extracted = runner.invoke(k.app, ["extract", eid, "--extractor", "dependency-map", "--json"])
+        assert extracted.exit_code == 0, repr(extracted.exception)
+        candidate = json.loads(extracted.stdout)["candidates"][0]
+        assert candidate["subject"] == "repo:acme/widgets"
+        assert candidate["object"] == "repo:acme/auth"
+        add_fact(store, "dependency", candidate["text"], repo="acme/widgets",
+                 subject=candidate["subject"], predicate=candidate["predicate"], object=candidate["object"],
+                 repo_path="dependencies.yaml", validator={"type": "git-dependency-map", "path": "dependencies.yaml"})
+        assert json.loads(runner.invoke(k.app, ["sweep", "dependency", "--json"]).stdout)[0]["outcome"] == "supported"
     def test_extract_codeowners_creates_evidence_linked_pending_edges(self, store):
         from typer.testing import CliRunner
 
@@ -1234,3 +1268,14 @@ class TestSweeper:
         assert [row["id"] for row in selection] == ["unknown", "old"]
         assert "never validated" in selection[0]["reasons"]
         assert k.read_jsonl(k.VALIDATION_LOG_NAME) == []
+
+    def test_sweep_records_bounded_run_summary(self, store):
+        from typer.testing import CliRunner
+        add_fact(store, "one", "One.", subject="repo:x/y", predicate="contains_path", object="path:one",
+                 repo_path="one", validator={"type": "git-path", "path": "one"})
+        add_fact(store, "two", "Two.", subject="repo:x/y", predicate="contains_path", object="path:two",
+                 repo_path="two", validator={"type": "git-path", "path": "two"})
+        CliRunner().invoke(k.app, ["sweep", "--limit", "1", "--run-id", "nightly"])
+        summary = k.read_jsonl(k.SWEEP_LOG_NAME)[0]
+        assert summary["run_id"] == "nightly"
+        assert len(summary["selected"]) == len(summary["results"]) == 1

@@ -1,0 +1,5 @@
+[
+  {"id": "widgets", "text": "Widgets owns checkout.", "repo": "acme/widgets", "valid_from": "2026-01-01"},
+  {"id": "other", "text": "Other owns checkout.", "repo": "acme/other", "valid_from": "2026-01-01"},
+  {"id": "old", "text": "Legacy owns checkout.", "repo": "acme/widgets", "valid_from": "2025-01-01", "valid_to": "2026-01-01"}
+]
