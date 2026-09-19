@@ -31,6 +31,7 @@ import pytest
 import yaml
 
 CLI = Path(__file__).resolve().parent.parent / "bin" / "knowledge"
+TOPIC_HOOK = Path(__file__).resolve().parent.parent / "hooks" / "knowledge-inject-topics.sh"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -47,6 +48,33 @@ def plain(output: str) -> str:
     `no_color` nor NO_COLOR is enough; they drop the colour and keep the bold.
     """
     return _ANSI.sub("", output).replace("\n", " ")
+
+
+def test_topic_hook_does_not_nag_about_unreviewed_candidates(tmp_path):
+    """Pending candidates are excluded from unattended retrieval by design."""
+    store = tmp_path / "store"
+    (store / "pending").mkdir(parents=True)
+    (store / "pending" / "candidate.yml").write_text("text: unreviewed\n")
+    knowledge_bin = tmp_path / "knowledge"
+    knowledge_bin.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  topics) echo 'testing (1)' ;;\n"
+        f"  config) echo '{store}' ;;\n"
+        "esac\n"
+    )
+    knowledge_bin.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(TOPIC_HOOK)],
+        env={**os.environ, "KNOWLEDGE_BIN": str(knowledge_bin)},
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "candidate assertion" not in result.stdout
+    assert "await review" not in result.stdout
 
 
 def _load_module():

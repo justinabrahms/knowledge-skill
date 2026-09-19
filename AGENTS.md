@@ -1,5 +1,10 @@
 # knowledge-skill
 
+## Commit convention
+
+This is an open-source repository. Use conventional commits, but do not create
+or reference Jira tickets in commit messages or project artifacts.
+
 ## Architecture Context
 
 - Architecture Decision Records are in `docs/adrs/`.
