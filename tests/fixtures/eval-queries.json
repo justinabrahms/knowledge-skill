@@ -1,0 +1,161 @@
+[
+  {
+    "_comment": "Labelled retrieval cases over eval-corpus.json. `expect` is scored (recall@k, MRR). `expect_first` additionally pins ranking. `must_not` and `expect_empty` are hard assertions, not scores -- returning a refuted fact or firing on filler is a correctness bug, not a quality dip, and must fail even when the aggregate score is healthy.",
+    "id": "_readme",
+    "skip": true
+  },
+
+  {"id": "cross-repo-slo-gate", "cwd": "meridian/pipeline-k8s",
+   "query": "does a service need an availability SLO defined before it can go to production",
+   "expect": ["beacon-requires-slo-before-promote"],
+   "_why": "THE regression. The answer is tagged meridian/beacon and the question is asked from the pipeline repo. Repo-as-filter returned nothing here."},
+
+  {"id": "cross-repo-synthetics-home", "cwd": "meridian/pipeline-k8s",
+   "query": "where should synthetic checks for a service live, in its own chart or centrally",
+   "expect": ["beacon-synthetics-live-in-repo"]},
+
+  {"id": "cross-repo-idempotency", "cwd": "meridian/gateway",
+   "query": "why do ledger write operations carry an idempotency key",
+   "expect": ["ledger-writes-are-idempotent"]},
+
+  {"id": "local-repo-ownership-boost", "cwd": "meridian/atlas-api",
+   "query": "which team owns the atlas-api service and its on-call rotation",
+   "expect": ["atlas-owned-by-tideway"], "expect_first": "atlas-owned-by-tideway",
+   "_why": "Four ownership facts share a sentence template. The local repo tag is what should break the tie."},
+
+  {"id": "ownership-ledger-from-nowhere", "cwd": "",
+   "query": "which team owns the ledger service and its on-call rotation",
+   "expect": ["ledger-owned-by-lantern"], "expect_first": "ledger-owned-by-lantern",
+   "_why": "Same template, no repo signal. Ranking has to come from the subject alone."},
+
+  {"id": "ownership-beacon-from-nowhere", "cwd": "",
+   "query": "who owns the beacon service",
+   "expect": ["beacon-owned-by-harbor"], "expect_first": "beacon-owned-by-harbor"},
+
+  {"id": "pipeline-tooling-vs-definitions", "cwd": "",
+   "query": "does the platform team own the pipeline definitions that service teams write",
+   "expect": ["pipeline-tooling-owned-by-harbor"]},
+
+  {"id": "valid-time-beacon-runtime", "cwd": "meridian/beacon",
+   "query": "how does the beacon service run, on virtual machines or as a container workload",
+   "expect": ["beacon-runs-on-containers"], "must_not": ["beacon-ran-on-vms"],
+   "_why": "The superseded fact is lexically the better match for 'virtual machines'."},
+
+  {"id": "refuted-batch-window", "cwd": "",
+   "query": "can batch reconciliation be triggered on demand or only in a nightly window",
+   "must_not": ["nightly-batch-window-refuted"]},
+
+  {"id": "superseded-single-region", "cwd": "",
+   "query": "does the platform serve from a single region with no failover",
+   "must_not": ["single-region-only-superseded"]},
+
+  {"id": "invalidated-alert-router", "cwd": "",
+   "query": "do alerts route through the legacy notifier before reaching the on-call schedule",
+   "must_not": ["old-alert-router-invalidated"]},
+
+  {"id": "deploy-not-landing", "cwd": "meridian/pipeline-k8s",
+   "query": "my change merged but the deploy never landed and there is no freight",
+   "expect": ["promotion-freight-tag-contract"], "expect_first": "promotion-freight-tag-contract"},
+
+  {"id": "new-service-missing", "cwd": "meridian/pipeline-k8s",
+   "query": "I onboarded a new service and it has not appeared yet after syncing",
+   "expect": ["pipeline-app-of-apps-lag"]},
+
+  {"id": "canary-hold", "cwd": "",
+   "query": "how long does a release sit at the canary stage before it is promoted",
+   "expect": ["promotion-requires-green-canary"]},
+
+  {"id": "how-to-roll-back", "cwd": "meridian/pipeline-k8s",
+   "query": "what is the correct way to roll back a bad release",
+   "expect": ["rollback-is-a-forward-promote"],
+   "_why": "Known headroom, deliberately left failing. The question and its answer share no content token -- the fact says 'rolling back means promoting the previous freight forward' and never says 'release'. Purely lexical scoring cannot bridge that. It scores 0 today and is baked into the baseline; any move toward stemming or synonyms should show up here first."},
+
+  {"id": "controller-topology", "cwd": "",
+   "query": "do the deployment controllers run centrally or once per cluster",
+   "expect": ["deploys-are-per-cluster"], "expect_first": "deploys-are-per-cluster"},
+
+  {"id": "missing-trace", "cwd": "",
+   "query": "I cannot find the trace for one specific production request",
+   "expect": ["traces-sampled-at-ten-percent"]},
+
+  {"id": "log-line-missing", "cwd": "",
+   "query": "why is my plain text log line not showing up in the index",
+   "expect": ["logs-structured-json-only"]},
+
+  {"id": "empty-dashboard", "cwd": "",
+   "query": "my new dashboard renders empty even though the service is emitting metrics",
+   "expect": ["collector-drops-unlabelled-metrics"], "expect_first": "collector-drops-unlabelled-metrics"},
+
+  {"id": "alert-paging-rules", "cwd": "",
+   "query": "can a burn rate alert page without a runbook link",
+   "expect": ["slo-alerts-need-runbook-link"]},
+
+  {"id": "out-of-hours-paging", "cwd": "",
+   "query": "what is the bar for an alert that can page someone overnight",
+   "expect": ["pages-outside-hours-need-runbook", "slo-alerts-need-runbook-link"]},
+
+  {"id": "latency-objective-shape", "cwd": "meridian/atlas-api",
+   "query": "should the latency objective be stated at the mean or a high percentile",
+   "expect": ["atlas-latency-slo-p99"], "expect_first": "atlas-latency-slo-p99"},
+
+  {"id": "where-objective-docs-live", "cwd": "",
+   "query": "where should objective documentation live so it does not drift",
+   "expect": ["dashboards-live-next-to-monitors"]},
+
+  {"id": "branch-lifetime", "cwd": "",
+   "query": "how long is a feature branch allowed to live before merging to trunk",
+   "expect": ["trunk-based-short-branches"], "expect_first": "trunk-based-short-branches"},
+
+  {"id": "commit-subject-form", "cwd": "",
+   "query": "what form does a commit subject have to take to pass the merge check",
+   "expect": ["conventional-commits-required"], "expect_first": "conventional-commits-required"},
+
+  {"id": "who-must-review", "cwd": "",
+   "query": "who has to review a change that touches an owned directory",
+   "expect": ["codeowners-two-reviewers"]},
+
+  {"id": "edited-manifest-reverted", "cwd": "",
+   "query": "I edited a generated manifest by hand and my edit disappeared",
+   "expect": ["generated-files-never-hand-edited"], "expect_first": "generated-files-never-hand-edited"},
+
+  {"id": "secret-in-manifest", "cwd": "",
+   "query": "can I put secret material directly into a private manifest",
+   "expect": ["secrets-never-in-manifests"], "expect_first": "secrets-never-in-manifests"},
+
+  {"id": "unbounded-outbound-call", "cwd": "meridian/gateway",
+   "query": "do outbound calls need an explicit timeout or is the library default fine",
+   "expect": ["gateway-timeouts-are-explicit"], "expect_first": "gateway-timeouts-are-explicit"},
+
+  {"id": "pagination-style", "cwd": "meridian/atlas-api",
+   "query": "does the api paginate with an offset or an opaque cursor",
+   "expect": ["atlas-uses-cursor-pagination"], "expect_first": "atlas-uses-cursor-pagination"},
+
+  {"id": "severity-meaning", "cwd": "",
+   "query": "does incident severity describe customer impact or how hard it is to fix",
+   "expect": ["incident-severity-drives-comms"], "expect_first": "incident-severity-drives-comms"},
+
+  {"id": "postmortem-action-items", "cwd": "",
+   "query": "what makes a postmortem action item count as a real one",
+   "expect": ["postmortems-are-blameless"]},
+
+  {"id": "config-discovery", "cwd": "",
+   "query": "how do the command line tools find their configuration from a scratch directory",
+   "expect": ["cli-config-walks-upward"]},
+
+  {"id": "private-endpoint-unreachable", "cwd": "",
+   "query": "the internal registry is giving me a certificate error and will not resolve",
+   "expect": ["vpn-required-for-private-endpoints"], "expect_first": "vpn-required-for-private-endpoints"},
+
+  {"id": "filler-only-aside", "cwd": "",
+   "query": "did you run the config file change thing again today or not",
+   "expect_empty": true,
+   "_why": "Every content token is in recall_generic. Firing here taxes attention on every prompt."},
+
+  {"id": "filler-only-thanks", "cwd": "meridian/atlas-api",
+   "query": "thanks, can you also update the test files and show me the changes",
+   "expect_empty": true},
+
+  {"id": "unrelated-domain", "cwd": "",
+   "query": "what is the airspeed velocity of an unladen swallow",
+   "expect_empty": true}
+]

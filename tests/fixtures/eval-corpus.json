@@ -1,0 +1,56 @@
+[
+  {
+    "_comment": "Wholly invented org. Nothing here is mined from a real store: a public repo should not carry anonymised private notes, and a scrubber is not a thing to trust with that. Facts share vocabulary on purpose -- an eval corpus where every fact is lexically distinct scores 1.0 forever and never detects anything.",
+    "id": "_readme",
+    "text": "PLACEHOLDER",
+    "skip": true
+  },
+
+  {"id": "atlas-owned-by-tideway", "topic": "ownership", "text": "Team Tideway owns the atlas-api service and its on-call rotation.", "repo": "meridian/atlas-api"},
+  {"id": "beacon-owned-by-harbor", "topic": "ownership", "text": "Team Harbor owns the beacon service and its on-call rotation.", "repo": "meridian/beacon"},
+  {"id": "ledger-owned-by-lantern", "topic": "ownership", "text": "Team Lantern owns the ledger service and its on-call rotation.", "repo": "meridian/ledger"},
+  {"id": "gateway-owned-by-tideway", "topic": "ownership", "text": "Team Tideway owns the gateway service and its on-call rotation.", "repo": "meridian/gateway"},
+  {"id": "pipeline-tooling-owned-by-harbor", "topic": "ownership", "text": "Team Harbor owns the deployment pipeline tooling itself, but not the pipeline definitions individual services write."},
+
+  {"id": "beacon-requires-slo-before-promote", "topic": "deploys", "text": "A service must have an availability SLO defined before the promotion pipeline will let it reach production.", "repo": "meridian/beacon"},
+  {"id": "beacon-synthetics-live-in-repo", "topic": "deploys", "text": "Synthetic checks for a service live in that service's own chart and are promoted with it, rather than being maintained centrally in the pipeline repository.", "repo": "meridian/beacon"},
+  {"id": "promotion-requires-green-canary", "topic": "deploys", "text": "The promotion pipeline holds a release at the canary stage until the canary analysis reports green for ten consecutive minutes."},
+  {"id": "promotion-freight-tag-contract", "topic": "deploys", "text": "The promotion pipeline only picks up an image whose tag matches the release channel it is promoting into; a mismatched tag produces no freight and the deploy silently never lands.", "repo": "meridian/pipeline-k8s"},
+  {"id": "pipeline-app-of-apps-lag", "topic": "deploys", "text": "A newly onboarded service can take one full reconciliation cycle to appear, because the app-of-apps picks it up before the child application syncs.", "repo": "meridian/pipeline-k8s"},
+  {"id": "deploys-are-per-cluster", "topic": "deploys", "text": "Deployment controllers run once per cluster rather than from a single central installation, so a cluster-wide outage cannot stall promotions everywhere."},
+  {"id": "rollback-is-a-forward-promote", "topic": "deploys", "text": "Rolling back means promoting the previous known-good freight forward; the pipeline has no reverse operation and editing the live manifest is drift."},
+
+  {"id": "traces-sampled-at-ten-percent", "topic": "observability", "text": "Production traces are head-sampled at ten percent, so a single request is usually absent and trace-based debugging needs an aggregate view."},
+  {"id": "logs-structured-json-only", "topic": "observability", "text": "Services emit structured JSON logs; a plain-text log line is dropped by the collector rather than being indexed as an unparsed blob."},
+  {"id": "slo-alerts-need-runbook-link", "topic": "observability", "text": "An SLO burn-rate alert is only allowed to page if it carries a runbook link; alerts without one are routed to a review channel instead."},
+  {"id": "atlas-latency-slo-p99", "topic": "observability", "text": "The atlas-api latency objective is stated at the 99th percentile, not the mean, because the mean hid a slow tail that customers felt.", "repo": "meridian/atlas-api"},
+  {"id": "collector-drops-unlabelled-metrics", "topic": "observability", "text": "The metrics collector drops any series missing the service and environment labels, which is the usual reason a new dashboard renders empty."},
+  {"id": "dashboards-live-next-to-monitors", "topic": "observability", "text": "Objective documentation belongs next to the monitors it describes rather than in a separate wiki page that drifts."},
+
+  {"id": "trunk-based-short-branches", "topic": "conventions", "text": "Work merges to trunk behind a flag rather than living on a long-lived branch; a branch older than two days is treated as a review failure."},
+  {"id": "conventional-commits-required", "topic": "conventions", "text": "Commit subjects follow the conventional-commits form and carry a tracker reference, which the merge check enforces."},
+  {"id": "codeowners-two-reviewers", "topic": "conventions", "text": "A change touching a directory with a CODEOWNERS entry needs review from that owning team before it can merge."},
+  {"id": "generated-files-never-hand-edited", "topic": "conventions", "text": "Generated manifests are regenerated rather than hand-edited; a hand edit is overwritten on the next generation run and the drift is silent."},
+  {"id": "secrets-never-in-manifests", "topic": "conventions", "text": "Secret material is referenced by pointer from the secret store and never written into a manifest, even a private one."},
+
+  {"id": "ledger-writes-are-idempotent", "topic": "conventions", "text": "Ledger write operations carry an idempotency key, because the retry path replays them and the original design double-counted.", "repo": "meridian/ledger"},
+  {"id": "gateway-timeouts-are-explicit", "topic": "conventions", "text": "Every outbound call from the gateway sets an explicit timeout; the library default is unbounded and caused a thread-pool exhaustion incident.", "repo": "meridian/gateway"},
+  {"id": "atlas-uses-cursor-pagination", "topic": "conventions", "text": "The atlas-api paginates with an opaque cursor rather than an offset, so a page boundary stays stable while rows are inserted.", "repo": "meridian/atlas-api"},
+
+  {"id": "incident-severity-drives-comms", "topic": "incidents", "text": "Incident severity determines who is notified, not how hard the problem is to fix; a small bug with customer impact outranks a large internal one."},
+  {"id": "postmortems-are-blameless", "topic": "incidents", "text": "Postmortems name systems and decisions rather than people, and an action item without an owner and a date does not count as one."},
+  {"id": "pages-outside-hours-need-runbook", "topic": "incidents", "text": "An alert that can page outside working hours must be actionable by whoever is on call without escalation, or it should not page."},
+
+  {"id": "cli-config-walks-upward", "topic": "tooling", "text": "The command-line tools discover their configuration by walking upward from the working directory, so a scratch directory outside any project falls back to the user-level file."},
+  {"id": "local-env-uses-containers", "topic": "tooling", "text": "Local development runs dependencies in containers rather than installed services, so a version skew between two engineers is a container tag difference."},
+  {"id": "vpn-required-for-private-endpoints", "topic": "tooling", "text": "Private cluster endpoints and the internal registry are only reachable over the VPN; an off-VPN failure usually surfaces as a name-resolution or certificate error rather than as a refused connection."},
+
+  {"id": "beacon-ran-on-vms", "topic": "deploys", "text": "The beacon service runs on virtual machines managed by configuration management.", "repo": "meridian/beacon", "valid_from": "2023-01-01", "valid_to": "2025-06-01"},
+  {"id": "beacon-runs-on-containers", "topic": "deploys", "text": "The beacon service runs as a container workload scheduled by the orchestrator.", "repo": "meridian/beacon", "valid_from": "2025-06-01"},
+
+  {"id": "nightly-batch-window-refuted", "topic": "deploys", "text": "Batch reconciliation runs in a nightly window and cannot be triggered on demand.", "epistemic_status": "refuted"},
+  {"id": "single-region-only-superseded", "topic": "deploys", "text": "The platform serves from a single region and has no failover.", "epistemic_status": "superseded"},
+  {"id": "old-alert-router-invalidated", "topic": "incidents", "text": "Alerts route through the legacy notifier before reaching the on-call schedule.", "invalidated_at": "2026-02-01", "invalidation_reason": "notifier was removed"},
+
+  {"id": "stale-but-usable-cache-policy", "topic": "tooling", "text": "The shared build cache is keyed by lockfile hash, so a dependency bump invalidates it for everyone at once.", "last_verified_at": "2025-03-01"}
+]

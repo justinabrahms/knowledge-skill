@@ -224,6 +224,38 @@ stays attributable and a bad batch can be traced to the run that produced it.
 harness records blank, because a guessed provider reads as evidence at review
 time and is worse than no answer.
 
+## The retrieval eval
+
+`tests/test_retrieval_eval.py` scores `recall` against a fixed corpus of
+labelled questions. The unit suite tests recall the *function*; this tests
+recall the *answer*, which is the layer where quality actually lives. The repo
+filter described above shipped with the whole unit suite green.
+
+Two gates, graded differently. Returning a refuted, superseded or out-of-window
+fact, or firing on pure filler, fails on its own — that is correctness. recall@3
+and MRR are compared against `tests/fixtures/eval-baseline.json` with a small
+tolerance, because no absolute bar is defensible for a corpus this size while
+"this change made it worse" always is. Rebaseline deliberately:
+
+    UPDATE_EVAL_BASELINE=1 ./run-tests.sh
+
+Reintroducing the repo filter moves it from 0.95 to 0.85 and fails the gate by
+name, which is the only evidence that an eval is worth keeping.
+
+The corpus is invented end to end. It is not an anonymised export: a public
+repository should not carry scrubbed private notes, and a scrubber is not a
+thing to stake that on. Facts share vocabulary on purpose — a corpus where every
+fact is lexically distinct scores 1.0 forever and detects nothing. One case,
+`how-to-roll-back`, is left permanently failing and baked into the baseline as
+recorded headroom: its question and answer share no content token, so lexical
+scoring cannot bridge it, and any move toward stemming should surface there
+first.
+
+`TestRecallHookContract` covers the hook rather than the CLI under it, with
+synthetic stdin and no model spend. That exists because this repo has already
+shipped a recall hook reading the prompt from an environment variable the
+harness does not set: it recalled nothing on every message and looked healthy.
+
 ## Duplicate detection
 
 Similarity is tf-idf cosine, not token overlap. Token overlap does not survive

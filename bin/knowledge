@@ -2811,7 +2811,7 @@ def cmd_recall(
         as_of = iso_date(as_of, "--as-of")
     # An explicit --repo is a question about one repository and restricts.
     # A repo merely inferred from cwd is context, and only reorders: the facts
-    # you most need in parloa-k8s are routinely the ones tagged deploy-gates.
+    # you most need in one repo are routinely the ones tagged with another.
     restrict_repo = (repo or "") if (repo is not None and not all_repos) else ""
     query_repo = (repo if repo is not None else detect_repo()) or ""
     checkout = repo_checkout(query_repo) if query_repo else None

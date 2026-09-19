@@ -30,25 +30,9 @@ import frontmatter
 import pytest
 import yaml
 
-CLI = Path(__file__).resolve().parent.parent / "bin" / "knowledge"
+from conftest import CLI, add_fact, k, plain  # noqa: F401  (re-exported for tests)
+
 TOPIC_HOOK = Path(__file__).resolve().parent.parent / "hooks" / "knowledge-inject-topics.sh"
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def plain(output: str) -> str:
-    """Strip styling and wrapping before matching a literal against CLI output.
-
-    `console` is a plain `rich.Console()`, so highlighting is on and rich colours
-    bare integers: "from 1 active facts" is emitted as
-    "from \\x1b[1;36m1\\x1b[0m active facts". Whether it does depends on the
-    environment -- rich only styles when it thinks something is watching -- so a
-    literal assertion that straddles a number passes on a bare terminal and fails
-    under anything that sets FORCE_COLOR, which every agent harness does. Neither
-    `no_color` nor NO_COLOR is enough; they drop the colour and keep the bold.
-    """
-    return _ANSI.sub("", output).replace("\n", " ")
-
 
 def test_topic_hook_does_not_nag_about_unreviewed_candidates(tmp_path):
     """Pending candidates are excluded from unattended retrieval by design."""
@@ -77,49 +61,7 @@ def test_topic_hook_does_not_nag_about_unreviewed_candidates(tmp_path):
     assert "await review" not in result.stdout
 
 
-def _load_module():
-    spec = importlib.util.spec_from_loader(
-        "knowledge_cli", importlib.machinery.SourceFileLoader("knowledge_cli", str(CLI))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["knowledge_cli"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-k = _load_module()
-
-
 # ---------------------------------------------------------------- fixtures
-
-@pytest.fixture(autouse=True)
-def _isolate_user_config(tmp_path, monkeypatch):
-    """No test may read or write the developer's real user config.
-
-    `find_config_file` falls back to USER_CONFIG when walking up finds nothing,
-    so a test running in a bare tmp dir silently picked up whatever the
-    developer had configured. That is not a hypothetical: `tune --write` wrote
-    thresholds derived from these synthetic fixtures into a real
-    ~/.config/knowledge/config.yml, replacing hand-written settings.
-    """
-    monkeypatch.setattr(k, "USER_CONFIG", tmp_path / "no-such-user-config.yml")
-    k._CONFIG = None
-    yield
-    k._CONFIG = None
-
-
-@pytest.fixture
-def store(tmp_path, monkeypatch):
-    """An empty store, wired up so the module resolves to it."""
-    s = tmp_path / "store"
-    (s / "pending").mkdir(parents=True)
-    monkeypatch.setenv("KNOWLEDGE_DIR", str(s))
-    monkeypatch.chdir(tmp_path)
-    k._STORE_OVERRIDE = None
-    k._CONFIG = None
-    k.load_config(reload=True)
-    return s
-
 
 def write_config(store: Path, **overrides) -> Path:
     cfg = {"store": ".", "scopes": ["org", "personal"], "prefixed_scopes": ["repo", "task"]}
@@ -128,20 +70,6 @@ def write_config(store: Path, **overrides) -> Path:
     p.write_text(yaml.safe_dump(cfg, sort_keys=False))
     k._CONFIG = None
     k.load_config(reload=True)
-    return p
-
-
-def add_fact(store: Path, fid: str, body: str, **fm) -> Path:
-    front = {"id": fid, "topic": fm.get("topic", "t"), "scope": fm.get("scope", "org"),
-             "learned_at": "2026-01-01", "last_verified_at": "2026-01-01",
-             "valid_until": None, "invalidated_at": fm.get("invalidated_at"),
-             "invalidation_reason": None, "confidence": fm.get("confidence", "high"),
-             "source": "test"}
-    for key, value in fm.items():
-        if key not in {"topic", "scope", "invalidated_at", "confidence"}:
-            front[key] = value
-    p = store / f"{fid}.md"
-    p.write_text("---\n" + yaml.safe_dump(front, sort_keys=False) + "---\n\n" + body + "\n")
     return p
 
 
@@ -1122,15 +1050,15 @@ class TestRepoAndDateAwareRetrieval:
         assert {row["id"] for row in widened} == {"here", "elsewhere", "global"}
 
     def test_recall_surfaces_other_repo_facts_from_inside_a_checkout(self, store, monkeypatch):
-        """The regression this rule exists for: a deploy-gates fact recalled
-        while standing in parloa-k8s. Exclusion made this return nothing."""
+        """The regression this rule exists for: a gatekeeper fact recalled
+        while standing in a different checkout. Exclusion returned nothing."""
         from typer.testing import CliRunner
-        add_fact(store, "gates", "Deploy gates require a Datadog SLO before production.",
-                 repo="acme/deploy-gates")
+        add_fact(store, "gates", "Gatekeeper requires an availability SLO before production.",
+                 repo="acme/gatekeeper")
         monkeypatch.setattr(k, "detect_repo", lambda cwd="": "acme/k8s")
         monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
         res = CliRunner().invoke(
-            k.app, ["recall", "do deploy gates require a datadog slo", "--json"])
+            k.app, ["recall", "does gatekeeper require an availability slo", "--json"])
         assert [h["id"] for h in json.loads(res.stdout)["hits"]] == ["gates"]
 
     def test_recall_boosts_the_local_repo_above_an_equal_match(self, store, monkeypatch):
