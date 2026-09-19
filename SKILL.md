@@ -69,16 +69,19 @@ an unconfirmed candidate.
 
 Before asserting ownership, topology, conventions, or “how do we do X”, check:
 
-- `knowledge recall "<prompt>"` — gated hook lookup; automatically scopes to the
-  current repository when run in a checkout.
+- `knowledge recall "<prompt>"` — gated hook lookup.
 - `knowledge search "<query>"` — explicit ranking; supports `--repo`,
   `--all-repos`, and `--as-of`.
 - `knowledge topics` / `knowledge list --topic <t>` / `knowledge get <id>`.
 - `knowledge graph-neighbors <entity> [--depth 1..3]` for typed relations.
 
-Repository-specific assertions for other repositories are excluded by default;
-org/global assertions remain eligible. Commit-validity fields are evaluated
-against the current checkout when available.
+The repository you are standing in **ranks** results; it never removes them. An
+explicit `--repo` restricts (to that repo's assertions plus repo-less ones);
+`--all-repos` lifts that restriction. The distinction matters because `propose
+--repo` defaults to cwd, so `repo:` records where a fact was learned at least as
+often as what it is about — and because the facts platform work needs most are
+usually about a *different* repo than the one open. Commit-validity fields are
+still evaluated against the current checkout when available.
 
 Treat metadata as load-bearing:
 
@@ -130,3 +133,26 @@ defaults, but never fabricates typed graph relations from prose.
 
 `knowledge usage` reports whether retrieval is effective. `knowledge dupes` and
 `knowledge tune` use review outcomes to improve consolidation thresholds.
+
+## Watching for retrieval regressions
+
+`knowledge retrieval-health [--days N] [--by day|week|agent|repo]` buckets recall
+events into recalls, hit rate, facts per recall, and how many assertions were
+eligible out of the whole store — plus which gate dropped the rest.
+
+Read hit rate and `elig` together. Hit rate falling while `elig` holds means the
+floor or the scoring moved; falling *with* `elig` means assertions stopped being
+eligible, and `dropped` names the gate. That pairing is the point: an
+eligibility change is invisible in hit rate alone until someone notices recall
+has quietly gone thin.
+
+Every write and every lookup is stamped with the agent and session that made it
+(`agent`, `session_id`), sniffed from the harness env. `KNOWLEDGE_AGENT` and
+`KNOWLEDGE_SESSION_ID` override the sniffer for a harness it does not know; an
+unrecognised one records blank rather than a guess. `confirm` carries the
+*proposing* session onto the fact, since that is the run whose judgement the
+claim rests on.
+
+`knowledge pending --session <id>` and `--agent <name>` narrow the queue to one
+run. A bad session produces a bad batch, and reviewing it as a batch is the
+point of recording the id at all.

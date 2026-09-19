@@ -10,6 +10,14 @@ KNOWLEDGE_BIN=${KNOWLEDGE_BIN:-$HOME/bin/knowledge}
 input=$(cat)
 prompt=$(printf '%s' "$input" | jq -r '.prompt // empty')
 
+# Attribute the lookup. The harness hands hooks the session id on stdin, which
+# is authoritative; the env var is the fallback for harnesses that only export
+# it. Without this, hook-driven recalls — the overwhelming majority — show up
+# unattributed in `knowledge retrieval-health --by agent`.
+session=$(printf '%s' "$input" | jq -r '.session_id // empty')
+export KNOWLEDGE_AGENT="${KNOWLEDGE_AGENT:-claude}"
+export KNOWLEDGE_SESSION_ID="${KNOWLEDGE_SESSION_ID:-${session:-${CLAUDE_CODE_SESSION_ID:-}}}"
+
 # Slash commands and short acknowledgements do not have useful retrieval signal.
 case "$prompt" in
   /*) exit 0 ;;

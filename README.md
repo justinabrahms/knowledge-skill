@@ -186,6 +186,16 @@ go read them, never pasted inline. Stale and expired facts are surfaced *with*
 their marker rather than filtered out, so retrieval cannot quietly launder an
 old fact into a current answer.
 
+The repository you are standing in is a **ranking** signal, worth `repo_boost`,
+not an eligibility one. It was briefly a filter, and that was a mistake worth
+recording: `propose --repo` defaults to the cwd repo, so `repo:` records where a
+fact was learned about as often as what it is about — and cross-repo facts are
+exactly what platform work needs. On one real store, standing in the GitOps repo
+cut the eligible corpus from 355 to 322 and turned a two-fact recall into zero,
+for a query whose best answers were tagged with a different repo. An explicit
+`--repo` still restricts, because that is someone asking a question about one
+repository rather than a directory happening to be open.
+
 ## Knowing whether any of it is used
 
 Reads append to `.usage.jsonl` in the store. `knowledge usage` reports per-fact
@@ -194,6 +204,25 @@ all. Without it, curation can only prune by age, which says nothing about
 whether a fact ever changed an answer — and `usage --misses` lists the queries
 that matched nothing, which is the only honest input for retuning the floor.
 `KNOWLEDGE_USAGE_LOG=0` disables it.
+
+`knowledge retrieval-health` answers the different question of whether retrieval
+itself has regressed. Each recall records not just whether it hit but the shape
+of the corpus it ran against: how many assertions were eligible out of the whole
+store, which gate dropped the rest, and the floor in force. Bucketed by day,
+week, agent or repo, an eligibility change lands as a step in one column.
+
+That column exists because hit rate on its own cannot tell "the floor moved"
+from "the corpus shrank". The repo filter above degraded recall for a full day
+of sessions while every metric then recorded — hit rate included — stayed within
+its normal range, because the queries that would have hit were no longer being
+scored against the facts that would have answered them.
+
+Writes and lookups also carry `agent` and `session_id`, sniffed from the harness
+environment (Claude Code, Codex, Cursor), so a store several agents write to
+stays attributable and a bad batch can be traced to the run that produced it.
+`KNOWLEDGE_AGENT` / `KNOWLEDGE_SESSION_ID` override the sniffer; an unknown
+harness records blank, because a guessed provider reads as evidence at review
+time and is worse than no answer.
 
 ## Duplicate detection
 

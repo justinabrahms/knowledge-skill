@@ -1090,9 +1090,12 @@ class TestRepoAndDateAwareRetrieval:
         monkeypatch.chdir(repo)
         now = json.loads(CliRunner().invoke(k.app, ["search", "owns checkout", "--as-of", "2026-06-01", "--json"]).stdout)
         old = json.loads(CliRunner().invoke(k.app, ["search", "owns checkout", "--as-of", "2025-06-01", "--json"]).stdout)
-        assert {row["id"] for row in now} == {"widgets"}
+        # Valid time still isolates. The cwd repo no longer does: it only
+        # reorders, so the acme/other fact stays eligible from acme/widgets.
+        assert {row["id"] for row in now} == {"widgets", "other"}
         assert {row["id"] for row in old} == {"old"}
-    def test_search_defaults_to_current_repo_and_keeps_global_facts(self, store, monkeypatch):
+
+    def test_cwd_repo_ranks_but_never_excludes_other_repos(self, store, monkeypatch):
         from typer.testing import CliRunner
         add_fact(store, "here", "Checkout uses GitOps.", repo="acme/checkout")
         add_fact(store, "elsewhere", "Checkout uses GitOps elsewhere.", repo="acme/other")
@@ -1101,7 +1104,44 @@ class TestRepoAndDateAwareRetrieval:
         monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
         rows = json.loads(CliRunner().invoke(
             k.app, ["search", "gitops deployment", "--json"]).stdout)
+        assert {row["id"] for row in rows} == {"here", "elsewhere", "global"}
+
+    def test_explicit_repo_restricts_where_cwd_does_not(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "here", "Checkout uses GitOps.", repo="acme/checkout")
+        add_fact(store, "elsewhere", "Checkout uses GitOps elsewhere.", repo="acme/other")
+        add_fact(store, "global", "GitOps is the deployment convention.")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "acme/checkout")
+        monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["search", "gitops deployment", "--repo", "acme/checkout", "--json"]).stdout)
         assert {row["id"] for row in rows} == {"here", "global"}
+        widened = json.loads(CliRunner().invoke(
+            k.app, ["search", "gitops deployment", "--repo", "acme/checkout",
+                    "--all-repos", "--json"]).stdout)
+        assert {row["id"] for row in widened} == {"here", "elsewhere", "global"}
+
+    def test_recall_surfaces_other_repo_facts_from_inside_a_checkout(self, store, monkeypatch):
+        """The regression this rule exists for: a deploy-gates fact recalled
+        while standing in parloa-k8s. Exclusion made this return nothing."""
+        from typer.testing import CliRunner
+        add_fact(store, "gates", "Deploy gates require a Datadog SLO before production.",
+                 repo="acme/deploy-gates")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "acme/k8s")
+        monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
+        res = CliRunner().invoke(
+            k.app, ["recall", "do deploy gates require a datadog slo", "--json"])
+        assert [h["id"] for h in json.loads(res.stdout)["hits"]] == ["gates"]
+
+    def test_recall_boosts_the_local_repo_above_an_equal_match(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "local", "Kargo promotes freight to a stamp.", repo="acme/k8s")
+        add_fact(store, "remote", "Kargo promotes freight to a stamp.", repo="acme/other")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "acme/k8s")
+        monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
+        res = CliRunner().invoke(
+            k.app, ["recall", "how does kargo promote freight to a stamp", "--json"])
+        assert [h["id"] for h in json.loads(res.stdout)["hits"]] == ["local", "remote"]
 
     def test_search_respects_valid_time(self, store):
         from typer.testing import CliRunner
@@ -1307,3 +1347,160 @@ class TestSweeper:
         summary = k.read_jsonl(k.SWEEP_LOG_NAME)[0]
         assert summary["run_id"] == "nightly"
         assert len(summary["selected"]) == len(summary["results"]) == 1
+
+
+class TestAgentProvenance:
+    """Who wrote this, in which session.
+
+    A store several harnesses write to is otherwise unattributable: review sees
+    a claim with no way to tell a Claude session from a Codex one, and a bad
+    batch cannot be traced back to the run that produced it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_ambient_agent(self, monkeypatch):
+        """The suite itself runs inside an agent. Clear the markers so a test
+        asserting "unattributed" does not pass or fail on who ran it."""
+        for var in ("KNOWLEDGE_AGENT", "KNOWLEDGE_SESSION_ID", "CLAUDECODE",
+                    "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
+                    "CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_HOME",
+                    "CURSOR_SESSION_ID"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_claude_code_is_detected_from_its_session_env(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "aed12345-0000")
+        assert k.agent_identity() == {"agent": "claude", "session_id": "aed12345-0000"}
+
+    def test_codex_is_detected_and_not_confused_with_claude(self, monkeypatch):
+        monkeypatch.setenv("CODEX_SESSION_ID", "cx-7")
+        assert k.agent_identity() == {"agent": "codex", "session_id": "cx-7"}
+
+    def test_explicit_env_overrides_the_sniffer(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "ignored")
+        monkeypatch.setenv("KNOWLEDGE_AGENT", "somebot")
+        monkeypatch.setenv("KNOWLEDGE_SESSION_ID", "s-1")
+        assert k.agent_identity() == {"agent": "somebot", "session_id": "s-1"}
+
+    def test_unknown_harness_is_blank_not_guessed(self):
+        assert k.agent_identity() == {"agent": "", "session_id": ""}
+
+    def test_propose_records_the_writing_agent(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "aed99")
+        CliRunner().invoke(k.app, ["propose", "Kargo promotes freight to stamps.",
+                                   "--topic", "kargo", "--id", "p1", "--evidence", "e"])
+        data = yaml.safe_load((store / "pending" / "p1.yml").read_text())
+        assert data["agent"] == "claude" and data["session_id"] == "aed99"
+
+    def test_confirm_keeps_the_proposing_session_not_the_confirming_one(self, store, monkeypatch):
+        """Provenance is about which model run made the claim. Confirmation is a
+        human act already stamped by learned_at."""
+        from typer.testing import CliRunner
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "proposer")
+        CliRunner().invoke(k.app, ["propose", "Kargo promotes freight to stamps.",
+                                   "--topic", "kargo", "--id", "p1", "--evidence", "e"])
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "confirmer")
+        CliRunner().invoke(k.app, ["confirm", "p1"])
+        post = frontmatter.loads((store / "p1.md").read_text())
+        assert post["agent"] == "claude" and post["session_id"] == "proposer"
+
+    def test_ingest_records_the_writing_agent(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.setenv("CODEX_SESSION_ID", "cx-9")
+        CliRunner().invoke(k.app, ["ingest", "Something observed.", "--source", "session"])
+        eid, data = k.all_episodes()[0]
+        assert data["agent"] == "codex" and data["session_id"] == "cx-9"
+
+    def test_events_and_usage_carry_the_agent(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "aed99")
+        add_fact(store, "a-fact", "Deploys reach clusters through argocd.")
+        CliRunner().invoke(k.app, ["get", "a-fact"])
+        CliRunner().invoke(k.app, ["propose", "Argocd runs per cluster.",
+                                   "--topic", "argocd", "--id", "p2", "--evidence", "e"])
+        usage = [json.loads(x) for x in
+                 (store / k.USAGE_LOG_NAME).read_text().splitlines() if x.strip()]
+        assert all(r["agent"] == "claude" and r["session_id"] == "aed99" for r in usage)
+        assert all(e["agent"] == "claude" for e in k.read_jsonl(k.EVENT_LOG_NAME))
+
+    def test_a_blank_agent_adds_no_keys_to_events(self, store):
+        from typer.testing import CliRunner
+        CliRunner().invoke(k.app, ["propose", "Argocd runs per cluster.",
+                                   "--topic", "argocd", "--id", "p3", "--evidence", "e"])
+        event = k.read_jsonl(k.EVENT_LOG_NAME)[0]
+        assert "agent" not in event and "session_id" not in event
+
+
+class TestRetrievalHealth:
+    """The regression detector. Hit rate alone cannot tell "the floor moved"
+    from "the corpus shrank", which is how a repo filter removed a third of
+    eligible facts without anything looking broken."""
+
+    def test_recall_records_corpus_shape_not_just_the_hit(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "live", "Kargo promotes freight to a stamp.")
+        add_fact(store, "dead", "Kargo promotes freight to a stamp.",
+                 epistemic_status="refuted")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "")
+        CliRunner().invoke(k.app, ["recall", "how does kargo promote freight", "--quiet"])
+        row = [json.loads(x) for x in
+               (store / k.USAGE_LOG_NAME).read_text().splitlines() if x.strip()][-1]
+        assert row["eligible"] == 1 and row["total"] == 2
+        assert row["excluded"] == {"status": 1}
+
+    def test_a_miss_still_records_the_best_score_it_saw(self, store, monkeypatch):
+        """Without this a floor set too high is indistinguishable from an empty
+        store: both log hit=False and nothing else."""
+        from typer.testing import CliRunner
+        add_fact(store, "live", "Kargo promotes freight to a stamp.")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "")
+        CliRunner().invoke(k.app, ["recall", "how does kargo promote freight",
+                                   "--min-score", "0.99", "--quiet"])
+        row = [json.loads(x) for x in
+               (store / k.USAGE_LOG_NAME).read_text().splitlines() if x.strip()][-1]
+        assert row["hit"] is False and row["top"] > 0.0 and row["eligible"] == 1
+
+    def test_report_surfaces_an_eligibility_drop(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "live", "Kargo promotes freight to a stamp.")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "")
+        CliRunner().invoke(k.app, ["recall", "how does kargo promote freight", "--quiet"])
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["retrieval-health", "--json"]).stdout)
+        assert len(rows) == 1
+        assert rows[0]["recalls"] == 1 and rows[0]["hit_rate"] == 1.0
+        assert rows[0]["eligible"] == 1.0 and rows[0]["corpus"] == 1.0
+
+    def test_report_buckets_by_agent(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        add_fact(store, "live", "Kargo promotes freight to a stamp.")
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "")
+        monkeypatch.setenv("KNOWLEDGE_AGENT", "claude")
+        monkeypatch.setenv("KNOWLEDGE_SESSION_ID", "s1")
+        CliRunner().invoke(k.app, ["recall", "how does kargo promote freight", "--quiet"])
+        monkeypatch.setenv("KNOWLEDGE_AGENT", "codex")
+        CliRunner().invoke(k.app, ["recall", "how does kargo promote freight", "--quiet"])
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["retrieval-health", "--by", "agent", "--json"]).stdout)
+        assert {r["bucket"] for r in rows} == {"claude", "codex"}
+
+    def test_report_is_quiet_with_no_recalls(self, store):
+        from typer.testing import CliRunner
+        res = CliRunner().invoke(k.app, ["retrieval-health"])
+        assert res.exit_code == 0 and "No recall events" in plain(res.stdout)
+
+    def test_pending_filters_by_session_so_a_bad_batch_is_reviewable(self, store, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.setenv("KNOWLEDGE_AGENT", "claude")
+        monkeypatch.setenv("KNOWLEDGE_SESSION_ID", "good")
+        CliRunner().invoke(k.app, ["propose", "Argocd runs per cluster.",
+                                   "--topic", "argocd", "--id", "ok", "--evidence", "e"])
+        monkeypatch.setenv("KNOWLEDGE_SESSION_ID", "bad")
+        CliRunner().invoke(k.app, ["propose", "Kargo promotes freight to stamps.",
+                                   "--topic", "kargo", "--id", "oops", "--evidence", "e"])
+        rows = json.loads(CliRunner().invoke(
+            k.app, ["pending", "--session", "bad", "--json"]).stdout)
+        assert [r["id"] for r in rows] == ["oops"]
+        by_agent = json.loads(CliRunner().invoke(
+            k.app, ["pending", "--agent", "claude", "--json"]).stdout)
+        assert {r["id"] for r in by_agent} == {"ok", "oops"}

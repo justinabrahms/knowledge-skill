@@ -104,6 +104,12 @@ DEFAULTS: dict = {
     # The SQLite graph is a disposable projection. By default it lives in a
     # cache keyed by the external store path, never beside application code.
     "graph_cache": str(Path.home() / ".cache/knowledge"),
+    # Score multiplier for an assertion about the repository you are standing
+    # in. A boost, never a filter: cross-repo facts are the ones platform work
+    # needs most, and `propose --repo` defaults to cwd, so the `repo:` field
+    # records where a fact was learned at least as often as what it is about.
+    # Excluding on it hid exactly the facts worth surfacing.
+    "repo_boost": 1.15,
     # Distinctive shared tokens a fact needs before `recall` will surface it.
     "recall_min_shared": 1,
     # Vocabulary too generic to justify a recall hit on its own. These still
@@ -187,6 +193,10 @@ topology, conventions, or "how do we do X" — check first.
 - `knowledge graph-neighbors <entity>` — typed relations around an entity
 - `knowledge index` — one line per fact; use sparingly
 
+The repo you are standing in only **ranks** results. Pass `--repo` to restrict to
+one repository's assertions; without it nothing is excluded on repo, because the
+fact you need in one repo is routinely tagged with another.
+
 Frontmatter is load-bearing when you read a fact:
 
 - `confidence: low` — a hint, not authority. Verify before acting.
@@ -219,6 +229,15 @@ candidates that restate one claim while naming *different* magnitudes for the
 same quantity, most of them are wrong — the merged fact should usually state no
 number rather than pick one. Reject with a reason naming the survivor: it blocks
 re-proposal, and it is the labelled data `knowledge tune` learns thresholds from.
+
+## Health
+
+`knowledge retrieval-health [--by day|week|agent|repo]` is how a retrieval
+regression gets caught. Hit rate falling while `elig` holds means the floor or
+the scoring moved; falling with it means assertions stopped being eligible, and
+`dropped` names the gate. Writes and lookups are stamped with the agent and
+session that made them; set `KNOWLEDGE_AGENT`/`KNOWLEDGE_SESSION_ID` if your
+harness is not one the sniffer knows.
 """
 
 
@@ -506,10 +525,51 @@ def append_jsonl(name: str, record: dict) -> None:
         err_console.print(f"[yellow]Could not append {name}:[/yellow] {exc}")
 
 
+# Which harness a write came from, keyed off the env each one exports. A store
+# written by several agents is otherwise unattributable: "some model said so in
+# some session" is not provenance you can go back and re-read.
+AGENT_ENV: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    # (agent, marker env var, session-id env vars in preference order)
+    ("claude", "CLAUDE_CODE_SESSION_ID", ("CLAUDE_CODE_SESSION_ID",)),
+    ("claude", "CLAUDECODE", ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")),
+    ("codex", "CODEX_SESSION_ID", ("CODEX_SESSION_ID", "CODEX_THREAD_ID")),
+    ("codex", "CODEX_HOME", ("CODEX_SESSION_ID", "CODEX_THREAD_ID")),
+    ("cursor", "CURSOR_SESSION_ID", ("CURSOR_SESSION_ID",)),
+)
+
+
+def agent_identity() -> dict[str, str]:
+    """Which agent, in which session, is writing.
+
+    Explicit `KNOWLEDGE_AGENT`/`KNOWLEDGE_SESSION_ID` win so a harness we do not
+    know about can still attribute itself. Otherwise sniff the env markers each
+    known harness exports. Unattributed is a real answer and is recorded as
+    empty: a guessed provider is worse than a blank one, because it reads as
+    evidence at review time.
+    """
+    agent = os.getenv("KNOWLEDGE_AGENT", "").strip()
+    session = os.getenv("KNOWLEDGE_SESSION_ID", "").strip()
+    if not agent:
+        for name, marker, session_vars in AGENT_ENV:
+            if not os.getenv(marker):
+                continue
+            agent = name
+            if not session:
+                session = next((v for v in (os.getenv(k, "").strip()
+                                            for k in session_vars) if v), "")
+            break
+    return {"agent": agent, "session_id": session}
+
+
+def with_agent(record: dict) -> dict:
+    """Stamp agent provenance onto a record, without inventing empty keys."""
+    return {**record, **{k: v for k, v in agent_identity().items() if v}}
+
+
 def append_event(kind: str, ident: str, **data) -> None:
-    append_jsonl(EVENT_LOG_NAME, {
+    append_jsonl(EVENT_LOG_NAME, with_agent({
         "at": utc_now_iso(), "kind": kind, "id": ident, **data,
-    })
+    }))
 
 
 def read_jsonl(name: str) -> list[dict]:
@@ -567,6 +627,7 @@ def write_episode(
         "path": path,
         "cwd": cwd or os.getcwd(),
         "trusted": False,
+        **agent_identity(),
     }
     dest = episodes_dir(create=True) / observed_at[:7] / f"{eid}.yml"
     write_yaml(dest, record)
@@ -779,6 +840,7 @@ def log_usage(action: str, ids: Optional[list[str]] = None, query: str = "", **e
             # transcript of everything the user ever typed.
             record["query"] = query[:200]
         record.update(extra)
+        record.update({k: v for k, v in agent_identity().items() if v})
         with (knowledge_dir() / USAGE_LOG_NAME).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
     except Exception:
@@ -1334,6 +1396,8 @@ def write_new_fact(
     episodes: Optional[list[str]] = None,
     validator: Optional[dict] = None,
     epistemic_status: str = "supported",
+    agent: str = "",
+    session_id: str = "",
 ) -> Path:
     today = today_iso()
     meta = {
@@ -1364,6 +1428,10 @@ def write_new_fact(
         ("valid_from", valid_from), ("valid_to", valid_to),
         ("valid_from_commit", valid_from_commit), ("valid_to_commit", valid_to_commit),
         ("repo_revision", repo_revision), ("repo_path", repo_path),
+        # The agent and session that PROPOSED the claim, not the one confirming
+        # it. Confirmation is a human act with a timestamp; what a later reader
+        # needs is which model run made the claim in the first place.
+        ("agent", agent), ("session_id", session_id),
     ):
         if value:
             meta[key] = value
@@ -1943,6 +2011,7 @@ def queue_extracted_candidate(episode_id: str, episode: dict, relation: dict, ex
         "repo_revision": str(episode.get("revision") or ""),
         "repo_path": str(episode.get("path") or "CODEOWNERS"),
         "extraction": {"kind": extractor, "version": 1, "line": relation["line"]},
+        **agent_identity(),
     }
     write_yaml(pending_dir(create=True) / f"{pid}.yml", record)
     append_event("assertion.extracted", pid, episode=episode_id, repo=repo,
@@ -2259,6 +2328,10 @@ def cmd_propose(
         "repo": final_repo,
         "cwd": os.getcwd(),
         "episodes": episode_ids,
+        # Which agent in which session queued this. Review reads it to weigh a
+        # candidate, and it is the only way to trace a bad batch back to the
+        # session that produced it.
+        **agent_identity(),
     }
     for key, value in (
         ("subject", subject), ("predicate", predicate), ("object", object_value),
@@ -2291,6 +2364,8 @@ def cmd_pending(
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output for review flows."),
     rejected: bool = typer.Option(False, "--rejected", help="Show the rejected log instead."),
     archived: bool = typer.Option(False, "--archived", help="Show candidates that aged out unreviewed."),
+    agent: Optional[str] = typer.Option(None, "--agent", help="Only candidates queued by this agent."),
+    session: Optional[str] = typer.Option(None, "--session", help="Only candidates queued in this session id."),
     count: bool = typer.Option(False, "--count", help="Print just the number of queued candidates."),
 ):
     """List candidate facts awaiting review. UNVETTED — leads, not facts."""
@@ -2298,6 +2373,12 @@ def cmd_pending(
     if topic:
         topic_slug = slugify(topic, max_words=3)
         rows = [(pid, d) for pid, d in rows if d.get("topic") == topic_slug]
+    # A bad run produces a bad batch. Reviewing it as a batch is the only reason
+    # recording the session is worth the bytes.
+    if agent is not None:
+        rows = [(pid, d) for pid, d in rows if str(d.get("agent") or "") == agent]
+    if session is not None:
+        rows = [(pid, d) for pid, d in rows if str(d.get("session_id") or "") == session]
 
     if count:
         sys.stdout.write(f"{len(rows)}\n")
@@ -2399,6 +2480,8 @@ def cmd_confirm(
         repo_path=str(data.get("repo_path", "")),
         episodes=[str(x) for x in data.get("episodes") or []],
         validator=data.get("validator") if isinstance(data.get("validator"), dict) else None,
+        agent=str(data.get("agent", "")),
+        session_id=str(data.get("session_id", "")),
     )
     src.unlink()
     append_event("assertion.confirmed", fid, pending_id=pending_id)
@@ -2623,8 +2706,8 @@ def cmd_search(
     limit: int = typer.Option(8, "--limit", "-n", help="How many hits to show."),
     pending: bool = typer.Option(False, "--pending", help="Include unvetted candidates, labelled."),
     full: bool = typer.Option(False, "--full", help="Print whole bodies instead of one line each."),
-    repo: Optional[str] = typer.Option(None, "--repo", help="Repository context; defaults to cwd origin."),
-    all_repos: bool = typer.Option(False, "--all-repos", help="Do not filter assertions about other repositories."),
+    repo: Optional[str] = typer.Option(None, "--repo", help="Restrict to this repo's assertions plus repo-less ones. Without it, the cwd repo only boosts ranking."),
+    all_repos: bool = typer.Option(False, "--all-repos", help="Ignore an explicit --repo restriction."),
     as_of: str = typer.Option("", "--as-of", help="Valid-time date, YYYY-MM-DD."),
     as_json: bool = typer.Option(False, "--json"),
 ):
@@ -2637,6 +2720,8 @@ def cmd_search(
     """
     if as_of:
         as_of = iso_date(as_of, "--as-of")
+    # Same rule as `recall`: explicit --repo restricts, an inferred one ranks.
+    restrict_repo = (repo or "") if (repo is not None and not all_repos) else ""
     query_repo = (repo if repo is not None else detect_repo()) or ""
     checkout = repo_checkout(query_repo) if query_repo else None
     entries: list[tuple[str, str, str, str, str]] = []  # kind,id,text,repo,status
@@ -2644,7 +2729,7 @@ def cmd_search(
         if not assertion_retrievable(post, as_of):
             continue
         fact_repo = str(post.get("repo") or "")
-        if query_repo and fact_repo and fact_repo != query_repo and not all_repos:
+        if restrict_repo and fact_repo and fact_repo != restrict_repo:
             continue
         if fact_repo == query_repo and not commit_applies(post, checkout):
             continue
@@ -2653,7 +2738,7 @@ def cmd_search(
     if pending:
         for pid, data in all_pending():
             fact_repo = str(data.get("repo") or "")
-            if query_repo and fact_repo and fact_repo != query_repo and not all_repos:
+            if restrict_repo and fact_repo and fact_repo != restrict_repo:
                 continue
             entries.append(("pending", pid, " ".join(str(data.get("text", "")).split()),
                             fact_repo, "unvetted"))
@@ -2669,7 +2754,8 @@ def cmd_search(
     q = content_tokens(query)
     idf = _idf(docs + [q])
     qv = _vec(q, idf)
-    scored = sorted((((_cos(qv, _vec(d, idf)) * (1.15 if query_repo and e[3] == query_repo else 1.0)), e)
+    boost = float(load_config().get("repo_boost", 1.15))
+    scored = sorted((((_cos(qv, _vec(d, idf)) * (boost if query_repo and e[3] == query_repo else 1.0)), e)
                      for d, e in zip(docs, entries)),
                     key=lambda r: -r[0])
     hits = [(sc, e) for sc, e in scored if sc > 0.0][:limit]
@@ -2700,8 +2786,8 @@ def cmd_recall(
     min_score: Optional[float] = typer.Option(None, "--min-score", help="Blended-score floor."),
     min_shared: Optional[int] = typer.Option(None, "--min-shared", help="Min distinctive query tokens a fact must share."),
     max_chars: int = typer.Option(400, "--max-chars", help="Truncate each fact body past this."),
-    repo: Optional[str] = typer.Option(None, "--repo", help="Repository context; defaults to cwd origin."),
-    all_repos: bool = typer.Option(False, "--all-repos", help="Do not filter assertions about other repositories."),
+    repo: Optional[str] = typer.Option(None, "--repo", help="Restrict to this repo's assertions plus repo-less ones. Without it, the cwd repo only boosts ranking."),
+    all_repos: bool = typer.Option(False, "--all-repos", help="Ignore an explicit --repo restriction."),
     as_of: str = typer.Option("", "--as-of", help="Valid-time date, YYYY-MM-DD."),
     as_json: bool = typer.Option(False, "--json"),
     quiet: bool = typer.Option(False, "--quiet", help="Print nothing when nothing clears the bar (hook mode)."),
@@ -2723,22 +2809,31 @@ def cmd_recall(
     query = (query or "")[:4000]
     if as_of:
         as_of = iso_date(as_of, "--as-of")
+    # An explicit --repo is a question about one repository and restricts.
+    # A repo merely inferred from cwd is context, and only reorders: the facts
+    # you most need in parloa-k8s are routinely the ones tagged deploy-gates.
+    restrict_repo = (repo or "") if (repo is not None and not all_repos) else ""
     query_repo = (repo if repo is not None else detect_repo()) or ""
     checkout = repo_checkout(query_repo) if query_repo else None
+    boost = float(cfg.get("repo_boost", 1.15))
 
     facts = {}
+    excluded = {"status": 0, "repo": 0, "commit": 0}
     for fid, post in all_facts():
         if not assertion_retrievable(post, as_of):
+            excluded["status"] += 1
             continue
         fact_repo = str(post.get("repo") or "")
-        if query_repo and fact_repo and fact_repo != query_repo and not all_repos:
+        if restrict_repo and fact_repo and fact_repo != restrict_repo:
+            excluded["repo"] += 1
             continue
         if fact_repo == query_repo and not commit_applies(post, checkout):
+            excluded["commit"] += 1
             continue
         facts[fid] = post
     scored = score_pairs(query, [(fid, post.content) for fid, post in facts.items()])
     scored = [
-        (sc * (1.15 if query_repo and str(facts[fid].get("repo") or "") == query_repo else 1.0),
+        (sc * (boost if query_repo and str(facts[fid].get("repo") or "") == query_repo else 1.0),
          fid, distinct)
         for sc, fid, distinct in scored
     ]
@@ -2746,16 +2841,32 @@ def cmd_recall(
     hits = [(sc, fid) for sc, fid, distinct in scored
             if sc >= min_score and distinct >= min_shared][:limit]
 
+    # Enough shape to spot a retrieval regression after the fact. Hit rate alone
+    # cannot distinguish "the floor moved" from "the corpus shrank"; recording
+    # eligible-vs-total and why the rest dropped out is what makes a change in
+    # eligibility visible as a step in `retrieval-health` rather than as a slow
+    # unexplained decline in usefulness.
+    shape = {
+        "eligible": len(facts),
+        "total": len(facts) + sum(excluded.values()),
+        "excluded": {k: v for k, v in excluded.items() if v},
+        "min_score": round(min_score, 3),
+        "min_shared": min_shared,
+        "query_repo": query_repo,
+        "restrict_repo": restrict_repo,
+    }
+
     if not hits:
         if as_json:
             sys.stdout.write(json.dumps({"query": query[:200], "hits": []}) + "\n")
         elif not quiet:
             console.print("[dim]Nothing in the store scored above the recall floor.[/dim]")
-        log_usage("recall", [], query, n=0, hit=False)
+        log_usage("recall", [], query, n=0, hit=False,
+                  top=round(scored[0][0], 3) if scored else 0.0, **shape)
         return
 
     log_usage("recall", [fid for _, fid in hits], query,
-              n=len(hits), top=round(hits[0][0], 3), hit=True)
+              n=len(hits), top=round(hits[0][0], 3), hit=True, **shape)
 
     if as_json:
         sys.stdout.write(json.dumps({"query": query[:200], "hits": [{
@@ -2806,7 +2917,7 @@ def cmd_recall(
 
     pending_pairs = [
         (pid, str(d.get("text", ""))) for pid, d in all_pending()
-        if not query_repo or not d.get("repo") or d.get("repo") == query_repo or all_repos
+        if not restrict_repo or not d.get("repo") or d.get("repo") == restrict_repo
     ]
     pending_hits = [pid for sc, pid, distinct in score_pairs(query, pending_pairs)
                     if sc >= min_score and distinct >= min_shared][:5]
@@ -2901,6 +3012,108 @@ def cmd_index(
         if len(first) > max_chars:
             first = first[: max_chars - 1].rstrip() + "…"
         sys.stdout.write(f"{fid}: {first}\n")
+
+
+@app.command("retrieval-health")
+def cmd_retrieval_health(
+    days: int = typer.Option(30, "--days", "-d", help="Window to report over."),
+    by: str = typer.Option("day", "--by", help="Bucket rows by day | week | agent | repo."),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Per-bucket recall health, so a retrieval regression shows as a step.
+
+    `usage` answers "is this fact ever read". This answers the question that
+    cost real recall quality and went unnoticed for a day: did a change to
+    eligibility, the floor, or the corpus quietly stop recall from firing?
+
+    Read the columns together. Hit rate falling while `elig` holds steady means
+    the floor or the scoring moved; hit rate falling *with* `elig` means facts
+    stopped being eligible, and `dropped` names which gate did it: `status`
+    for refuted, superseded, invalidated or outside its valid window, `repo` for
+    an explicit --repo restriction, `commit` for commit-validity bounds. Rows
+    recorded before this command shipped carry no shape and report `elig` as —.
+    """
+    rows = [r for r in read_usage(days) if str(r.get("action")) == "recall"]
+    if not rows:
+        console.print(f"[dim]No recall events in the last {days}d. Reads are logged from "
+                      "`recall`/`get`; set KNOWLEDGE_USAGE_LOG=0 to disable.[/dim]")
+        return
+
+    def bucket(r: dict) -> str:
+        at = str(r.get("at", ""))[:10]
+        if by == "week":
+            try:
+                iso = date.fromisoformat(at).isocalendar()
+                return f"{iso.year}-W{iso.week:02d}"
+            except ValueError:
+                return at or "?"
+        if by == "agent":
+            return str(r.get("agent") or "unattributed")
+        if by == "repo":
+            return str(r.get("query_repo") or "(none)")
+        return at or "?"
+
+    if by not in {"day", "week", "agent", "repo"}:
+        raise typer.BadParameter("--by must be day, week, agent or repo")
+
+    buckets: dict[str, dict] = {}
+    for r in rows:
+        b = buckets.setdefault(bucket(r), {
+            "recalls": 0, "hits": 0, "returned": 0, "eligible": 0, "total": 0,
+            "shaped": 0, "drops": {},
+        })
+        b["recalls"] += 1
+        b["hits"] += 1 if r.get("hit") else 0
+        b["returned"] += int(r.get("n") or 0)
+        if r.get("total"):
+            b["shaped"] += 1
+            b["eligible"] += int(r.get("eligible") or 0)
+            b["total"] += int(r.get("total") or 0)
+        for reason, n in (r.get("excluded") or {}).items():
+            b["drops"][reason] = b["drops"].get(reason, 0) + int(n)
+
+    out = []
+    for name in sorted(buckets):
+        b = buckets[name]
+        shaped = b["shaped"] or 1
+        out.append({
+            "bucket": name,
+            "recalls": b["recalls"],
+            "hit_rate": round(b["hits"] / b["recalls"], 3),
+            "facts_per_recall": round(b["returned"] / b["recalls"], 2),
+            "eligible": round(b["eligible"] / shaped, 1) if b["shaped"] else 0.0,
+            "corpus": round(b["total"] / shaped, 1) if b["shaped"] else 0.0,
+            "dropped_per_recall": round(sum(b["drops"].values()) / b["recalls"], 1),
+            "drops": dict(sorted(b["drops"].items(), key=lambda kv: -kv[1])),
+        })
+
+    if as_json:
+        sys.stdout.write(json.dumps(out, indent=2) + "\n")
+        return
+
+    table = Table(show_lines=False, header_style="bold")
+    for col, just in (("bucket", "left"), ("recalls", "right"), ("hit rate", "right"),
+                      ("f/recall", "right"), ("elig", "right"), ("corpus", "right"),
+                      ("dropped", "left")):
+        table.add_column(col, justify=just)
+    for row in out:
+        drops = ", ".join(f"{k} {v}" for k, v in row["drops"].items()) or "—"
+        table.add_row(row["bucket"], str(row["recalls"]), f"{row['hit_rate'] * 100:.0f}%",
+                      f"{row['facts_per_recall']:.2f}",
+                      f"{row['eligible']:.0f}" if row["eligible"] else "—",
+                      f"{row['corpus']:.0f}" if row["corpus"] else "—",
+                      drops)
+    console.print(table)
+
+    overall = sum(r["recalls"] for r in out)
+    hits = sum(int(r["hit_rate"] * r["recalls"] + 0.5) for r in out)
+    console.print(f"[dim]{overall} recall(s) over {days}d, {hits} with at least one fact "
+                  f"({100.0 * hits / overall:.0f}%). `elig` below `corpus` means assertions "
+                  "were excluded before scoring — see the dropped column for which gate.[/dim]")
+    unattributed = sum(1 for r in rows if not r.get("agent"))
+    if unattributed:
+        console.print(f"[dim]{unattributed} recall(s) carry no agent — set KNOWLEDGE_AGENT/"
+                      "KNOWLEDGE_SESSION_ID for harnesses the sniffer does not know.[/dim]")
 
 
 @app.command("topics")
