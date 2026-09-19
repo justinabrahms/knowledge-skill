@@ -1,0 +1,27 @@
+tests/conftest.py
+  s_a7b92c9788b768::t_078b3e1df91d43 1-92
+tests/test_retrieval_eval.py
+  s_a7b92c9788b768::t_82d922e9a5a57c 1-33,35-171,173-200
+tests/fixtures/eval-corpus.json
+  s_a7b92c9788b768::t_be138142d39387 1-56
+tests/fixtures/eval-queries.json
+  s_a7b92c9788b768::t_f21d3f8652fd0a 1-70,72-161
+README.md
+  s_a7b92c9788b768::t_65a6beb1610f2e 227-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "36f638a1becd4c567562538f310d03846d2e764f",
+  "prompts": {},
+  "sessions": {
+    "s_a7b92c9788b768": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9ca2e23-f7a2-48b3-9497-37f1b42cadf0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
