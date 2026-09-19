@@ -1,0 +1,21 @@
+tests/test_knowledge.py
+  s_03d2cb3702efa9::t_8cd91c79bfa3c5 34,53-77
+AGENTS.md
+  s_03d2cb3702efa9::t_fd9d76281d0f23 3-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "122f13152908bfccbd714b2eb25e525a7216898f",
+  "prompts": {},
+  "sessions": {
+    "s_03d2cb3702efa9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b881-f671-75b3-b174-69a518c6db8a",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": null
+    }
+  }
+}
