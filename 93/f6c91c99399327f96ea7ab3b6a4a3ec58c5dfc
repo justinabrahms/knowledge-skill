@@ -1,0 +1,33 @@
+SKILL.md
+  s_026b0546183b43::t_af7962fdecca90 46-56
+bin/knowledge
+  s_026b0546183b43::t_2d5a4577b882b9 2003-2004,2049-2050,2064
+  s_026b0546183b43::t_ceb4b39396822e 2080-2084
+  s_026b0546183b43::t_a724bbc95e9930 2024-2027,2029-2034,2036-2048,2051-2063,2065-2078,2087-2091,2094-2096,2100-2108,2110-2128
+  s_026b0546183b43::t_1939a048b15812 1982-1983,1991,2109
+  s_026b0546183b43::t_be841e36980a90 2028,2035,2079,2085-2086,2092-2093,2097-2099
+README.md
+  s_026b0546183b43::t_af7962fdecca90 16,161-166
+scripts/check-no-internal-data.sh
+  s_026b0546183b43::t_af7962fdecca90 48
+tests/test_knowledge.py
+  s_026b0546183b43::t_c2729da436f78e 915-945,947
+  s_026b0546183b43::t_af7962fdecca90 948-952
+  s_026b0546183b43::t_2d5a4577b882b9 946
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "93f6c91c99399327f96ea7ab3b6a4a3ec58c5dfc",
+  "prompts": {},
+  "sessions": {
+    "s_026b0546183b43": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b9c4-f9ae-70b3-870d-09f136fa759e",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
