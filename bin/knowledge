@@ -1827,6 +1827,78 @@ def cmd_ingest(
         console.print(f"[green]Ingested[/green] {eid} → {dest}")
 
 
+def _parse_deaddrop_post(text: str) -> tuple[str, list[str], str]:
+    """Split a deaddrop post into (title, categories, body).
+
+    Posts are a ``# Title`` on line 1, an optional ``*<id>*`` line, then a
+    ``---`` frontmatter block with ``categories:`` and ``filed-by:``, then the
+    body. The frontmatter is not at the top, so python-frontmatter cannot parse
+    it; handle it by hand.
+    """
+    lines = text.splitlines()
+    title = ""
+    if lines and lines[0].startswith("# "):
+        title = lines[0][2:].strip()
+    cats: list[str] = []
+    body_start = 0
+    if "---" in lines:
+        start = lines.index("---")
+        end = None
+        for i in range(start + 1, len(lines)):
+            if lines[i].strip() == "---":
+                end = i
+                break
+        if end is not None:
+            for line in lines[start + 1:end]:
+                if line.startswith("categories:"):
+                    cats = [c.strip() for c in line.split(":", 1)[1].split(",") if c.strip()]
+            body_start = end + 1
+    body = "\n".join(lines[body_start:]).strip()
+    return title, cats, body
+
+
+@app.command("ingest-deaddrop")
+def cmd_ingest_deaddrop(
+    directory: str = typer.Option("", "--dir", help="Deaddrop directory (default: $DEADDROP_DIR, else ~/agents/repos/deaddrop)."),
+    quiet: bool = typer.Option(False, "--quiet", help="Print only the tallied counts."),
+):
+    """Ingest deaddrop posts as untrusted source episodes.
+
+    The dead-drop is a notebook of durable, portable lessons; this folds it into
+    the knowledge graph so its posts are recallable like any other source
+    material. Idempotent per post (keyed on source=deaddrop + the post's
+    filename), so a re-run ingests only posts it has not already seen.
+    """
+    drop = Path(directory or os.environ.get("DEADDROP_DIR") or Path.home() / "agents/repos/deaddrop")
+    if not drop.is_dir():
+        raise typer.BadParameter(f"no deaddrop at {drop}")
+
+    seen = {(d.get("source"), d.get("path")) for _, d in all_episodes() if d.get("source") == "deaddrop"}
+    post_re = re.compile(r"^\d{8}\.\d+.*\.md$")
+    ingested = skipped = 0
+    for f in sorted(drop.glob("*.md")):
+        if not post_re.match(f.name):
+            continue  # CLAUDE.md, README, an index — not a post
+        if ("deaddrop", f.name) in seen:
+            skipped += 1
+            continue
+        post = f.read_text(encoding="utf-8", errors="replace")
+        title, cats, body = _parse_deaddrop_post(post)
+        ref = f.name[:8]  # yyyymmdd lead of the filename
+        reference_time = f"{ref[:4]}-{ref[4:6]}-{ref[6:8]}"
+        text = f"# {title}\n\n{body}".strip() if title else body
+        write_episode(
+            text, kind="observation", source="deaddrop",
+            reference_time=reference_time, path=f.name,
+        )
+        ingested += 1
+
+    if quiet:
+        print(f"ingested={ingested} skipped={skipped}")
+    else:
+        console.print(f"[green]deaddrop[/green] ingested {ingested}, already seen {skipped} ({drop})")
+
+
 @app.command("episodes")
 def cmd_episodes(
     repo: Optional[str] = typer.Option(None, "--repo", help="Filter by canonical owner/name."),
