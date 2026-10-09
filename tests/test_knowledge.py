@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import json
@@ -682,6 +683,88 @@ class TestRecall:
         hits = self._hits(store, "how does kargo promote freight to a stamp")
         assert all(h["id"] != "kargo-guess" for h in hits)
 
+    def _lead_candidate(self, store, pid="kargo-guess", outcome="supported", observed="today", **kw):
+        add_candidate(store, pid, "Kargo promotes freight to a stamp on merge.",
+                      validator={"type": "git-path", "path": "x"}, **kw)
+        if outcome:
+            day = date.today().isoformat() if observed == "today" else observed
+            k.append_jsonl(k.VALIDATION_LOG_NAME, {
+                "assertion_id": pid, "candidate": True, "outcome": outcome,
+                "observed_at": f"{day}T00:00:00+00:00", "validator": "git-path",
+                "evidence": "acme/x@abc:x", "detail": "path exists"})
+
+    def _recall(self, store, query="how does kargo promote freight to a stamp"):
+        from typer.testing import CliRunner
+        res = CliRunner().invoke(k.app, ["recall", query, "--json"])
+        assert res.exit_code == 0, res.output
+        return json.loads(res.stdout)
+
+    def test_sweep_supported_candidate_surfaces_as_a_labelled_lead(self, store):
+        self._seed(store)
+        self._lead_candidate(store)
+        out = self._recall(store)
+        assert all(h["id"] != "kargo-guess" for h in out["hits"]), "a lead is never a fact"
+        lead = out["leads"][0]
+        assert lead["id"] == "kargo-guess" and lead["tier"] == "unverified-lead"
+        assert lead["provenance"] == "inferred" and lead["confidence"] == "low"
+        assert lead["validation"]["outcome"] == "supported"
+
+    def test_lead_text_is_caveated_and_kept_apart_from_facts(self, store):
+        from typer.testing import CliRunner
+        self._seed(store)
+        self._lead_candidate(store)
+        text = CliRunner().invoke(
+            k.app, ["recall", "how does kargo promote freight to a stamp"]).stdout
+        facts, _, leads = text.partition("# Unverified leads")
+        assert "kargo-guess" not in facts
+        assert "NOT established" in leads and "never state one to the user as fact" in leads
+        assert "inferred" in leads and "confidence: low" in leads and "queued" in leads
+        assert "git-path → supported" in leads
+
+    def test_leads_surface_even_when_no_confirmed_fact_matches(self, store):
+        from typer.testing import CliRunner
+        self._lead_candidate(store)
+        text = CliRunner().invoke(
+            k.app, ["recall", "how does kargo promote freight to a stamp", "--quiet"]).stdout
+        assert text.startswith("# Unverified leads") and "Recalled facts" not in text
+
+    @pytest.mark.parametrize("outcome,observed", [
+        (None, "today"),            # never swept
+        ("unknown", "today"),       # inconclusive
+        ("contradicted", "today"),  # refuted
+        ("supported", "2000-01-01"),  # stale
+    ])
+    def test_only_a_fresh_supported_sweep_makes_a_lead(self, store, outcome, observed):
+        self._seed(store)
+        self._lead_candidate(store, outcome=outcome, observed=observed)
+        out = self._recall(store)
+        assert out["leads"] == []
+
+    def test_unswept_matching_candidate_is_still_only_named(self, store):
+        from typer.testing import CliRunner
+        self._seed(store)
+        self._lead_candidate(store, outcome=None)
+        text = CliRunner().invoke(
+            k.app, ["recall", "how does kargo promote freight to a stamp"]).stdout
+        assert "Unverified leads" not in text
+        assert "kargo-guess" in text and "Kargo promotes freight to a stamp on merge" not in text
+
+    def test_leads_are_capped_and_truncated(self, store):
+        self._seed(store)
+        for i in range(4):
+            self._lead_candidate(store, pid=f"kargo-guess-{i}")
+        assert len(self._recall(store)["leads"]) == 2
+        k.load_config()["recall_max_leads"] = 0
+        assert self._recall(store)["leads"] == []
+
+    def test_leads_respect_an_explicit_repo_restriction(self, store):
+        self._seed(store)
+        self._lead_candidate(store, repo="acme/other")
+        from typer.testing import CliRunner
+        res = CliRunner().invoke(k.app, ["recall", "how does kargo promote freight to a stamp",
+                                         "--repo", "acme/widgets", "--json"])
+        assert json.loads(res.stdout)["leads"] == []
+
     def test_stale_facts_surface_with_their_marker(self, store):
         add_fact(store, "old-freight", "Kargo promotes freight to a stamp on image push.",
                  topic="deploy")
@@ -1206,6 +1289,33 @@ class TestSweeper:
         post = frontmatter.load(store / "deploy-file.md")
         assert post["epistemic_status"] == "refuted"
         assert len(k.read_jsonl(k.VALIDATION_LOG_NAME)) == 2
+
+    def test_sweep_logs_candidate_outcomes_without_promoting_them(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+        repo = self._git_repo(tmp_path)
+        monkeypatch.chdir(repo)
+        path = add_candidate(
+            store, "deploy-guess", "The repository contains deploy.yaml.",
+            repo="acme/widgets", subject="repo:acme/widgets", predicate="contains_path",
+            object="path:deploy.yaml", repo_path="deploy.yaml",
+            validator={"type": "git-path", "path": "deploy.yaml"})
+        before = path.read_text()
+        res = CliRunner().invoke(k.app, ["sweep", "--json"])
+        assert res.exit_code == 0, repr(res.exception)
+        row = next(r for r in json.loads(res.stdout) if r["id"] == "deploy-guess")
+        assert row["outcome"] == "supported" and row["candidate"] is True
+        assert path.read_text() == before, "sweep must not edit a candidate"
+        assert not (store / "deploy-guess.md").exists(), "sweep must not promote"
+        logged = k.latest_candidate_validations()["deploy-guess"]
+        assert logged["outcome"] == "supported" and logged["candidate"] is True
+
+    def test_sweep_dry_run_does_not_log_candidates(self, store, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.chdir(self._git_repo(tmp_path))
+        add_candidate(store, "deploy-guess", "The repository contains deploy.yaml.",
+                      repo="acme/widgets", validator={"type": "git-path", "path": "deploy.yaml"})
+        CliRunner().invoke(k.app, ["sweep", "--dry-run", "--json"])
+        assert k.latest_candidate_validations() == {}
 
     def test_missing_checkout_becomes_unknown_not_refuted(self, store):
         from typer.testing import CliRunner

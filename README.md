@@ -181,8 +181,14 @@ tokens still count toward the score, but a fact matched only on them is not
 eligible. Extend that list when recall fires on noise — it is the maintenance
 surface, not the floor.
 
-`recall` prints confirmed facts only. Matching candidates are named so you can
-go read them, never pasted inline. Stale and expired facts are surfaced *with*
+`recall` has two tiers that are never mixed. Confirmed facts print as above.
+A matching candidate that a `sweep` has marked supported (and that is younger
+than `stale_days`) prints in a separate "Unverified leads" block, labelled as
+not established, with its provenance, confidence, age and validator verdict,
+capped at `recall_max_leads` (default 2, `0` disables) and truncated to
+`recall_lead_chars`. Any other matching candidate is only named, never pasted
+inline. `sweep` validates queued candidates that carry a validator, logs the
+outcome, and never edits or promotes them. Stale and expired facts are surfaced *with*
 their marker rather than filtered out, so retrieval cannot quietly launder an
 old fact into a current answer.
 

@@ -152,6 +152,59 @@ class TestRetrievalRatchet:
             + ". If this is intended, rebaseline with UPDATE_EVAL_BASELINE=1 and say why.")
 
 
+class TestUnverifiedLeads:
+    """The second tier must not leak into the first, or exceed its budget.
+
+    Leads are why the gate matters more, not less: they ride along on every
+    prompt, so they have to obey the same relevance floor and a hard cap, and
+    they must never appear where a confirmed fact does.
+    """
+
+    @pytest.fixture
+    def with_leads(self, corpus_store):
+        from datetime import date
+        today = date.today().isoformat()
+        for i in range(4):
+            pid = f"ledger-lead-{i}"
+            (corpus_store / "pending" / f"{pid}.yml").write_text(yaml.safe_dump({
+                "id": pid, "topic": "t", "scope": "org", "confidence": "low",
+                "provenance": "inferred", "proposed_at": today,
+                "text": f"The ledger service on-call rotation is handled by team {i}.",
+                "validator": {"type": "git-path", "path": "x"}}))
+            k.append_jsonl(k.VALIDATION_LOG_NAME, {
+                "assertion_id": pid, "candidate": True, "outcome": "supported",
+                "observed_at": f"{today}T00:00:00+00:00", "validator": "git-path",
+                "evidence": "r@abc:x", "detail": "path exists"})
+        return corpus_store
+
+    def _recall(self, query, monkeypatch):
+        from typer.testing import CliRunner
+        monkeypatch.setattr(k, "detect_repo", lambda cwd="": "")
+        monkeypatch.setattr(k, "repo_checkout", lambda repo, cwd="": None)
+        res = CliRunner().invoke(k.app, ["recall", query, "--json"])
+        assert res.exit_code == 0, res.exception
+        return json.loads(res.stdout)
+
+    QUERY = "which team owns the ledger service and its on-call rotation"
+
+    def test_leads_never_appear_among_confirmed_hits_and_stay_capped(self, with_leads, monkeypatch):
+        out = self._recall(self.QUERY, monkeypatch)
+        assert "ledger-owned-by-lantern" in [h["id"] for h in out["hits"]]
+        assert not any(h["id"].startswith("ledger-lead") for h in out["hits"])
+        assert 0 < len(out["leads"]) <= 2
+
+    def test_filler_stays_silent_with_leads_present(self, with_leads, cases, monkeypatch):
+        for case in cases:
+            if case.get("expect_empty"):
+                out = self._recall(case["query"], monkeypatch)
+                assert out["hits"] == [] and out["leads"] == [], case["id"]
+
+    def test_confirmed_answers_are_unchanged_by_leads(self, with_leads, cases, monkeypatch):
+        """Leads are additive. The ratcheted metrics must not move."""
+        assert score(cases, monkeypatch) == {
+            k_: v for k_, v in json.loads(BASELINE.read_text()).items()}
+
+
 class TestRecallHookContract:
     """The hook, not the CLI underneath it.
 
@@ -177,6 +230,24 @@ class TestRecallHookContract:
                          "session_id": "s-1"}, corpus_store)
         assert res.returncode == 0, res.stderr
         assert "ledger-owned-by-lantern" in res.stdout, res.stdout or res.stderr
+
+    def test_the_hook_prints_leads_in_their_own_caveated_block(self, corpus_store):
+        from datetime import date
+        today = date.today().isoformat()
+        (corpus_store / "pending" / "ledger-lead.yml").write_text(yaml.safe_dump({
+            "id": "ledger-lead", "topic": "t", "scope": "org", "confidence": "low",
+            "provenance": "inferred", "proposed_at": today,
+            "text": "The ledger service on-call rotation is handled by a guess team.",
+            "validator": {"type": "git-path", "path": "x"}}))
+        (corpus_store / k.VALIDATION_LOG_NAME).write_text(json.dumps({
+            "assertion_id": "ledger-lead", "candidate": True, "outcome": "supported",
+            "observed_at": f"{today}T00:00:00+00:00", "validator": "git-path",
+            "evidence": "r@abc:x", "detail": "path exists"}) + "\n")
+        res = self._run({"prompt": "which team owns the ledger service and its on-call rotation",
+                         "session_id": "s-3"}, corpus_store)
+        facts, _, leads = res.stdout.partition("# Unverified leads")
+        assert "ledger-owned-by-lantern" in facts and "ledger-lead" not in facts
+        assert "ledger-lead" in leads and "NOT established" in leads
 
     def test_the_hook_attributes_the_session(self, corpus_store):
         self._run({"prompt": "which team owns the ledger service and its on-call rotation",
