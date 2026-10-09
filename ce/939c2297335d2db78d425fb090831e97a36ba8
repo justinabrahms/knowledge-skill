@@ -1,0 +1,30 @@
+bin/knowledge
+  s_4b0913d1f54dc1::t_4242f2650b1235 115-119,1750-1782,2234-2243,2245-2246,2254,2268-2272,2276-2277
+  s_4b0913d1f54dc1::t_183883f7e8530f 2856-2857,2891,2893
+  s_4b0913d1f54dc1::t_0649795919e663 2837-2855,2858-2890,2892,2894-2906,2927-2933,2973-2983,2999,3002-3005,3009,3013,3016,3062-3066
+tests/test_knowledge.py
+  s_4b0913d1f54dc1::t_e5c8c57d6a5d9d 686-767,1293-1318
+  s_4b0913d1f54dc1::t_8973ac6d2bcf44 25
+  s_4b0913d1f54dc1::t_4b5bc4f391ffdf 1319
+tests/test_retrieval_eval.py
+  s_4b0913d1f54dc1::t_1e432421964226 155-207,234-250
+  s_4b0913d1f54dc1::t_efe240d4a82553 251
+README.md
+  s_4b0913d1f54dc1::t_c5276f80140601 184-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ce939c2297335d2db78d425fb090831e97a36ba8",
+  "prompts": {},
+  "sessions": {
+    "s_4b0913d1f54dc1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4cab156-d47f-4955-a4a6-4571f529ddcb",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Justin Abrahms <justin@abrah.ms>"
+    }
+  }
+}
